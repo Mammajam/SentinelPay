@@ -1,36 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SentinelPay
 
-## Getting Started
+> ⚠️ **Sandbox-stage, not production-ready.** Never run against live PayPal credentials. See `docs/STATUS_REPORT.md`.
 
-First, run the development server:
+Deterministic guardrail & verification proxy for agentic commerce on PayPal. Next.js 16 · Neon Postgres · GEAP/Gemini policy-compiler agent.
 
+> Status: **sandbox-stage vertical slice.** Read `docs/STATUS_REPORT.md` first, then `docs/SPEC_ADDENDUM.md`, `docs/THREAT_MODEL.md`, `docs/COMPLIANCE_SCOPING.md`.
+
+## How it works
+1. **Compile** — an admin submits a natural-language directive to `POST /api/policies/compile`. A GEAP/Gemini agent (no tools, untrusted output) proposes a Policy v1 JSON. It is stored as a **draft** with a deterministic plain-language readback and a SHA-256 hash.
+2. **Confirm** — a human calls `POST /api/policies/confirm` echoing the hash. Only then is the policy `active`; its body is then DB-immutable.
+3. **Validate** — the agent calls `POST /api/validate-cart` (`agent` key). A pure, fail-closed evaluator returns `ALLOW | REQUIRE_REAUTH | DENY`.
+4. **Webhooks** — `POST /api/webhooks/paypal` verifies PayPal's signature, de-duplicates events, and inspects approved orders before any capture (capture call is a Phase 2 TODO).
+5. Everything is appended to a **hash-chained, append-only audit log**.
+
+## Setup
 ```bash
+npm install
+cp .env.example .env.local     # fill DATABASE_URL, GEAP_*/GOOGLE_API_KEY, key digests
+npm run db:migrate             # applies db/schema.sql to Neon
+npm test                       # 15 unit tests (node:test, no extra deps)
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
+Create API keys: `k=$(openssl rand -hex 32); echo $k; printf %s $k | shasum -a 256` → put the **digest** in `SENTINEL_AGENT_KEYS` / `SENTINEL_ADMIN_KEYS`, give the key to the caller.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Layout
+```
+src/lib/policy/    schema (rule language), evaluate (pure, fail-closed), readback (+hash)
+src/lib/paypal/    webhook verification, error mitigations, idempotency, Orders v2 -> cart
+src/lib/agent/     GEAP/Gemini policy compiler (PolicyCompiler interface)
+src/lib/db/        Neon pool, store, hash-chained audit append
+src/lib/audit/     chain primitives (pure)
+db/schema.sql      tables + immutability/append-only triggers
+tests/core.test.ts
+```
+Note: this Next.js version has `cacheComponents` enabled — route segment `runtime`/`dynamic` exports are rejected; use `connection()` + `<Suspense>` for per-request data.
