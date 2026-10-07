@@ -17,7 +17,9 @@ export const entryHash = (prevHash: string, kind: string, payload: unknown, at: 
 
 export function makeEntry(prev: AuditEntry | null, kind: string, payload: unknown, at = new Date().toISOString()): AuditEntry {
   const prevHash = prev?.hash ?? GENESIS;
-  return { seq: (prev?.seq ?? 0) + 1, prevHash, hash: entryHash(prevHash, kind, payload, at), kind, payload, at };
+  // Number(): Postgres returns bigint columns as strings; "1" + 1 would be "11".
+  const seq = Number(prev?.seq ?? 0) + 1;
+  return { seq, prevHash, hash: entryHash(prevHash, kind, payload, at), kind, payload, at };
 }
 
 /** Returns the seq of the first broken entry, or null if the chain is intact. */

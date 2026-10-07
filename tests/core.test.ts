@@ -117,3 +117,19 @@ test("audit chain detects tampering and deletion", () => {
   assert.equal(verifyChain([e1, { ...e2, payload: { n: 99 } }, e3]), 2);
   assert.equal(verifyChain([e1, e3]), 3);
 });
+
+test("audit seq stays numeric when the DB returns bigint as a string (regression)", () => {
+  const e1 = makeEntry(null, "a", {});
+  const fromDb = { ...e1, seq: "1" as unknown as number }; // what pg hands back for bigint
+  const e2 = makeEntry(fromDb, "b", {});
+  assert.equal(e2.seq, 2);
+  assert.equal(makeEntry(e2, "c", {}).seq, 3);
+});
+
+test("audit hash is stable across a JSON/DB round-trip, even with undefined fields (regression)", () => {
+  const payload = { orderId: "O1", issue: undefined, nested: { a: 1, b: undefined } };
+  const e = makeEntry(null, "order.capture_failed", payload);
+  const roundTripped = JSON.parse(JSON.stringify(payload));
+  assert.equal(e.hash, makeEntry(null, "order.capture_failed", roundTripped, e.at).hash);
+  assert.equal(verifyChain([{ ...e, payload: roundTripped }]), null);
+});

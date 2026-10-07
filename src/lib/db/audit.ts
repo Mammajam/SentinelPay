@@ -13,9 +13,11 @@ export async function appendAudit(kind: string, payload: unknown, client?: PoolC
     if (!client) await own.query("BEGIN");
     await own.query("SELECT pg_advisory_xact_lock(727001)");
     const { rows } = await own.query(
-      "SELECT seq, prev_hash AS \"prevHash\", hash, kind, payload, at FROM audit_log ORDER BY seq DESC LIMIT 1",
+      "SELECT seq::int AS seq, prev_hash AS \"prevHash\", hash, kind, payload, at FROM audit_log ORDER BY seq DESC LIMIT 1",
     );
-    const e = makeEntry((rows[0] as AuditEntry | undefined) ?? null, kind, payload);
+    // Hash exactly what the DB will store: jsonb drops undefined keys, so normalise first.
+    const stored = JSON.parse(JSON.stringify(payload ?? null)) as unknown;
+    const e = makeEntry((rows[0] as AuditEntry | undefined) ?? null, kind, stored);
     await own.query(
       "INSERT INTO audit_log (seq, prev_hash, hash, kind, payload, at) VALUES ($1,$2,$3,$4,$5,$6)",
       [e.seq, e.prevHash, e.hash, e.kind, JSON.stringify(e.payload), e.at],

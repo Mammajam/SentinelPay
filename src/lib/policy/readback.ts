@@ -33,7 +33,9 @@ export function canonicalize(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
   if (value && typeof value === "object") {
     const o = value as Record<string, unknown>;
-    return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${canonicalize(o[k])}`).join(",")}}`;
+    // Skip undefined like JSON.stringify does, so the canonical form of an object equals
+    // the canonical form of its JSON/DB round-trip (otherwise `{a: undefined}` hashes as "undefined").
+    return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonicalize(o[k])}`).join(",")}}`;
   }
   return JSON.stringify(value);
 }
