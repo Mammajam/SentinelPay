@@ -17,9 +17,11 @@ export function crc32(buf: Buffer): number {
  * PAYPAL-CERT-URL would let them supply their own key and forge events, so the
  * URL MUST be validated before it is fetched.
  */
-export function isTrustedCertUrl(raw: string): boolean {
+export function isTrustedCertUrl(raw: string, devOrigin?: string): boolean {
   try {
     const u = new URL(raw);
+    // Dev-only escape hatch for the local PayPal simulator (see devCertOrigin()).
+    if (devOrigin && u.origin === devOrigin && !u.username && u.pathname.startsWith("/v1/notifications/certs/")) return true;
     return (
       u.protocol === "https:" &&
       u.port === "" &&
@@ -29,6 +31,26 @@ export function isTrustedCertUrl(raw: string): boolean {
     );
   } catch {
     return false;
+  }
+}
+
+/**
+ * Returns the simulator's cert origin ONLY when it is provably a local dev setup:
+ * NODE_ENV is not production, PayPal base URL and cert origin are both loopback,
+ * and the cert origin is plain http. Anything else => undefined (feature off).
+ * This is what keeps the simulator from ever widening the trust boundary in prod.
+ */
+export function devCertOrigin(env: Record<string, string | undefined>): string | undefined {
+  const raw = env.SIM_CERT_ORIGIN;
+  if (!raw || env.NODE_ENV === "production") return undefined;
+  try {
+    const cert = new URL(raw);
+    const base = new URL(env.PAYPAL_BASE_URL ?? "");
+    const loopback = (h: string) => h === "localhost" || h === "127.0.0.1";
+    if (cert.protocol !== "http:" || !loopback(cert.hostname) || !loopback(base.hostname)) return undefined;
+    return cert.origin;
+  } catch {
+    return undefined;
   }
 }
 
@@ -48,6 +70,8 @@ export interface VerifyOptions {
   fetchCertPem: (certUrl: string) => Promise<string>;
   now?: Date;
   maxSkewSec?: number;
+  /** From devCertOrigin(); leave undefined everywhere except local simulator runs. */
+  devCertOrigin?: string;
 }
 
 const ALGOS: Record<string, string> = { SHA256withRSA: "RSA-SHA256" };
@@ -60,7 +84,7 @@ const ALGOS: Record<string, string> = { SHA256withRSA: "RSA-SHA256" };
 export async function verifyWebhook(rawBody: Buffer, h: WebhookHeaders, o: VerifyOptions): Promise<VerifyResult> {
   const algo = ALGOS[h.authAlgo];
   if (!algo) return { ok: false, reason: "unsupported_algo" };
-  if (!isTrustedCertUrl(h.certUrl)) return { ok: false, reason: "untrusted_cert_url" };
+  if (!isTrustedCertUrl(h.certUrl, o.devCertOrigin)) return { ok: false, reason: "untrusted_cert_url" };
 
   const t = Date.parse(h.transmissionTime);
   const now = (o.now ?? new Date()).getTime();

@@ -68,3 +68,17 @@ export async function recentValidations(limit = 50) {
   );
   return rows;
 }
+
+/** Un-claim an event whose processing failed, so PayPal's retry is processed (all side effects are idempotent). */
+export async function releaseWebhookEvent(eventId: string) {
+  await db().query("DELETE FROM webhook_events WHERE event_id=$1", [eventId]);
+}
+
+/** Record settled spend. Returns false if this capture id was already recorded (replay-safe). */
+export async function recordSpend(policyId: string, captureId: string, amount: number, currency: string): Promise<boolean> {
+  const { rowCount } = await db().query(
+    "INSERT INTO spend_ledger (policy_id, capture_id, amount, currency) VALUES ($1,$2,$3,$4) ON CONFLICT (capture_id) DO NOTHING",
+    [policyId, captureId, amount, currency],
+  );
+  return (rowCount ?? 0) === 1;
+}

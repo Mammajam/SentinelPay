@@ -54,3 +54,12 @@ The six recommendations from the concept assessment were actioned. A working, te
 4. Add rate limiting, real admin auth with MFA, tenant isolation.
 5. Define SLOs (suggest p95 < 150 ms for validate-cart) and metrics.
 6. Phase 4: AG Grid dashboard (confirm licensing) with the exception/re-trigger panel.
+
+---
+## Update 2026-10-07 — simulator, live Neon, capture path
+- **Neon**: schema migrated (5 tables, 2 triggers). Connectivity verified with the rotated credentials.
+- **Capture path built**: `src/lib/paypal/{client,capture}.ts`; webhook route now captures only on ALLOW, records `PAYMENT.CAPTURE.COMPLETED` in `spend_ledger`, un-claims events on failure so PayPal retries are processed.
+- **Local PayPal simulator** (`docs/PAYPAL_SIMULATOR.md`): 41 end-to-end checks against the real app + real Neon, **41/41 pass** (forged/stale/replayed webhooks, over-limit, double-capture, ambiguous 5xx, concurrency, audit-chain integrity).
+- **Two real bugs found and fixed** (audit seq string concat; undefined-in-hash). Dev DB test rows were reset twice with explicit approval.
+- **Unit tests**: 25/25. **Dependency audit**: see `docs/DEPENDENCY_AUDIT.md` (production deps clean).
+- **Still open**: Gemini generation blocked by depleted AI Studio credits (compiler untested live); PayPal sandbox access (O2/O5); Store Sync baselines (O3); auth/tenant isolation/rate limits; AG Grid (no Enterprise licence — Community/TanStack planned).
