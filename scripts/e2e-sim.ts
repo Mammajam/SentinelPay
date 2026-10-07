@@ -133,6 +133,9 @@ async function run() {
   const adminLogin = await createApiKey({ tenantId: TA, role: "admin", label: "e2e login" });
   const adminA2 = await createApiKey({ tenantId: TA, role: "admin", label: "e2e confirm 2" }); // TOTP codes are single-use, so each step gets its own key
   const adminB = await createApiKey({ tenantId: TB, role: "admin", label: "e2e" });
+  const adminDash = await createApiKey({ tenantId: TA, role: "admin", label: "e2e dashboard session" });
+  const adminB2 = await createApiKey({ tenantId: TB, role: "admin", label: "e2e retrigger (other tenant)" });
+  const mkAdmin = (label: string) => createApiKey({ tenantId: TA, role: "admin", label }); // one key per TOTP-gated call (codes are single-use)
   const agentA = await createApiKey({ tenantId: TA, role: "agent", label: "e2e" });
   const agentB = await createApiKey({ tenantId: TB, role: "agent", label: "e2e" });
 
@@ -282,11 +285,12 @@ async function run() {
   check("other tenant's admin + valid code => 409 (not yours)", wrongTenant.status === 409, wrongTenant.status);
   const wrongHash = await confirm(adminA.key, code(adminA.totpSecret!), d19.id, "0".repeat(64));
   check("owner + valid code but WRONG hash => 409", wrongHash.status === 409, wrongHash.status);
-  const confirmed = await confirm(adminA2.key, code(adminA2.totpSecret!), d19.id, d19.hash);
+  const replayCode = code(adminA2.totpSecret!); // computed ONCE: a replay is the identical code, not a freshly generated one (the 30 s window may roll over)
+  const confirmed = await confirm(adminA2.key, replayCode, d19.id, d19.hash);
   check("owner + valid code + right hash => 200", confirmed.status === 200, confirmed.status);
   check("policy is now active", (await db().query("select status from policies where id=$1", [d19.id])).rows[0].status === "active");
   const d19b = await makeDraft(TA);
-  const replay = await confirm(adminA2.key, code(adminA2.totpSecret!), d19b.id, d19b.hash);
+  const replay = await confirm(adminA2.key, replayCode, d19b.id, d19b.hash);
   check("re-using the same one-time code => 401 (replay blocked)", replay.status === 401, replay.status);
   check("policy stayed draft after replay", (await db().query("select status from policies where id=$1", [d19b.id])).rows[0].status === "draft");
 
@@ -317,7 +321,7 @@ async function run() {
   check("cookie is HttpOnly + SameSite=Strict", /HttpOnly/i.test(setCookie) && /SameSite=Strict/i.test(setCookie), setCookie.replace(/=[^;]+/, "=<redacted>"));
   const cookie = setCookie.split(";")[0];
   const page = await (await fetch(APP, { headers: { cookie } })).text();
-  check("signed-in page shows tenant A's name and its cart ids", page.includes(`Tenant A ${RUN}`) && page.includes("c-e2e"));
+  check("signed-in page shows tenant A's name and the dashboard shell (rows load client-side via the scoped APIs, see S25)", page.includes(`Tenant A ${RUN}`) && page.includes("Decisions") && page.includes("Exceptions"));
   check("signed-in page does NOT leak tenant B's data", !page.includes("cart-B-secret") && !page.includes(`Tenant B ${RUN}`));
   const anon = await (await fetch(APP)).text();
   check("no cookie => sign-in form, no data", anon.includes("Operator sign-in") && !anon.includes("c-e2e"));
@@ -351,6 +355,77 @@ async function run() {
   check("assistant: agent key => 403", (await api("/api/agent/assistant", agentA.key, { question: "hello there" })).status === 403);
   const live = await api("/api/agent/assistant", adminA.key, { question: "How many of my recent carts were denied?" });
   console.log(`  ℹ live assistant call (needs Gemini billing): HTTP ${live.status}${live.status === 200 ? " (model reachable)" : " (model unavailable/unfunded — not a code failure)"}`);
+
+  section("S25 Dashboard read APIs: session-only, tenant-scoped, paginated, filterable");
+  const dl = await api("/api/admin/login", null, { key: adminDash.key, totp: code(adminDash.totpSecret!) }, { "x-forwarded-for": `10.9.9.${Math.floor(Math.random() * 200)}` });
+  const dcookie = (dl.headers.get("set-cookie") ?? "").split(";")[0];
+  check("dashboard login ok", dl.status === 200, dl.status);
+  const dget = (path: string, cookieHdr: string | null) => fetch(`${APP}${path}`, { headers: cookieHdr ? { cookie: cookieHdr } : {} });
+  for (const path of ["/api/admin/validations", "/api/admin/policies", "/api/admin/exceptions"]) {
+    check(`${path}: no cookie => 401`, (await dget(path, null)).status === 401);
+    check(`${path}: a Bearer admin key alone => 401 (session only)`, (await fetch(`${APP}${path}`, { headers: { authorization: `Bearer ${adminA.key}` } })).status === 401);
+  }
+  const all = (await (await dget("/api/admin/validations?limit=100", dcookie)).json()) as { rows: Array<{ id: number; cartId: string; decision: string; policyId: string }> };
+  check("decisions are returned for the tenant", all.rows.length >= 4, all.rows.length);
+  check("no tenant-B data in A's decisions", !JSON.stringify(all).includes("cart-B-secret") && !all.rows.some((r) => r.policyId === pB));
+  const denies = (await (await dget("/api/admin/validations?limit=100&decision=DENY", dcookie)).json()) as { rows: Array<{ decision: string }> };
+  check("decision filter returns only DENY (and at least one)", denies.rows.length >= 1 && denies.rows.every((r) => r.decision === "DENY"), denies.rows.length);
+  const pg1 = (await (await dget("/api/admin/validations?limit=2", dcookie)).json()) as { rows: Array<{ id: number }>; nextBefore: number | null };
+  const pg2 = (await (await dget(`/api/admin/validations?limit=2&before=${pg1.nextBefore}`, dcookie)).json()) as { rows: Array<{ id: number }> };
+  check("keyset pagination: page 2 is strictly older, no overlap", pg1.rows.length === 2 && pg2.rows.length >= 1 && Math.max(...pg2.rows.map((r) => r.id)) < Math.min(...pg1.rows.map((r) => r.id)), { pg1: pg1.rows, pg2: pg2.rows });
+  check("bad query rejected (400)", (await dget("/api/admin/validations?limit=9999", dcookie)).status === 400 && (await dget("/api/admin/validations?decision=HACK", dcookie)).status === 400);
+  const pols = (await (await dget("/api/admin/policies", dcookie)).json()) as { policies: Array<{ id: string; status: string; hash: string; rules: string[] }> };
+  check("policies: own active + draft present with readback and hash, none of B's", pols.policies.some((x) => x.id === p1 && x.status === "active") && pols.policies.some((x) => x.id === d19b.id && x.status === "draft" && /^[0-9a-f]{64}$/.test(x.hash) && x.rules.length === 2) && !pols.policies.some((x) => x.id === pB));
+  const exc = (await (await dget("/api/admin/exceptions", dcookie)).json()) as { exceptions: Array<{ orderId: string; policyId: string; issue: string | null; ambiguous: boolean; attempt: number }> };
+  const e7 = exc.exceptions.find((x) => x.orderId === o7), e8 = exc.exceptions.find((x) => x.orderId === o8);
+  check("exceptions: CARD_EXPIRED order listed as definitely failed", e7?.issue === "CARD_EXPIRED" && e7.ambiguous === false && e7.attempt === 0, e7);
+  check("exceptions: 503 order listed as AMBIGUOUS", e8?.ambiguous === true, e8);
+  check("exceptions: a captured order is not listed", !exc.exceptions.some((x) => x.orderId === o1));
+
+  section("S26 Exception re-trigger: strictest endpoint (MFA, ownership, queue-only, reconcile, no double capture)");
+  const rt = (k: { key: string; totpSecret?: string }, orderId: string, policyId: string, withCode = true) =>
+    api("/api/admin/captures/retrigger", k.key, { orderId, policyId }, withCode ? { "x-sentinel-totp": code(k.totpSecret!) } : {});
+  const r1 = await mkAdmin("rt-1"), r2 = await mkAdmin("rt-2"), r3 = await mkAdmin("rt-3"), r4 = await mkAdmin("rt-4"), r5 = await mkAdmin("rt-5"), r6 = await mkAdmin("rt-6"), r7 = await mkAdmin("rt-7");
+  check("no MFA code => 401", (await rt(r1, o8, p8, false)).status === 401);
+  check("session cookie alone => 401", (await fetch(`${APP}/api/admin/captures/retrigger`, { method: "POST", headers: { cookie: dcookie, "content-type": "application/json" }, body: JSON.stringify({ orderId: o8, policyId: p8 }) })).status === 401);
+  check("agent key => 403", (await api("/api/admin/captures/retrigger", agentA.key, { orderId: o8, policyId: p8 }, { "x-sentinel-totp": "123456" })).status === 403);
+  check("other tenant's admin cannot touch A's order (404)", (await rt(adminB2, o8, p8)).status === 404);
+  check("an order not in the exception queue => 409", (await rt(r1, o2, p2)).status === 409);
+  check("an already-captured order => 409 (no double capture)", (await rt(r2, o1, p1)).status === 409);
+  check("still no extra capture on the captured order", (await simOrder(o1)).captures === 1);
+  check("failed orders were NOT captured by the refused attempts", (await simOrder(o8)).captures === 0 && (await simOrder(o7)).captures === 0);
+
+  await fetch(`${SIM}/sim/orders/${o8}/fault`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ capture_fault: "none" }) });
+  const ok8 = await rt(r3, o8, p8);
+  const ok8j = (await ok8.json()) as { status?: string; attempt?: number };
+  check("ambiguous failure, fault cleared => captured, SAME attempt (request id reused)", ok8.status === 200 && ok8j.status === "CAPTURED" && ok8j.attempt === 0, ok8j);
+  check("exactly 1 capture at PayPal, ledger row appears", (await simOrder(o8)).captures === 1 && Boolean(await until(async () => (await ledger(p8)).length === 1)));
+  const a8 = await audit(p8);
+  check("audit records the re-trigger (attempt 0, reused request id)", a8.some((e) => e.kind === "order.capture_retriggered" && e.payload.attempt === 0 && e.payload.reusedRequestId === true), a8.map((e) => e.kind));
+
+  await fetch(`${SIM}/sim/orders/${o7}/fault`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ capture_fault: "none" }) });
+  const ok7 = await rt(r4, o7, p7);
+  const ok7j = (await ok7.json()) as { status?: string; attempt?: number };
+  check("definite failure, fault cleared => captured with attempt 1 (new request id)", ok7.status === 200 && ok7j.attempt === 1, ok7j);
+  const a7 = await audit(p7);
+  const origRid = a7.find((e) => e.kind === "order.capture_failed" && !e.payload.retrigger)?.payload.requestId;
+  const newRid = a7.find((e) => e.kind === "order.captured" && e.payload.retrigger)?.payload.requestId;
+  check("the retry used a different PayPal-Request-Id than the failed attempt", Boolean(origRid && newRid && origRid !== newRid), { origRid, newRid });
+  const exc2 = (await (await dget("/api/admin/exceptions", dcookie)).json()) as { exceptions: Array<{ orderId: string }> };
+  check("both orders left the exception queue", !exc2.exceptions.some((x) => x.orderId === o7 || x.orderId === o8));
+  check("re-triggering a resolved order => 409", (await rt(r5, o7, p7)).status === 409);
+
+  // A retry that fails again keeps the order in the queue and bumps the attempt counter.
+  const p26 = await makePolicy(TA, HAPPY);
+  const o26 = (await createOrder({ policyId: p26, ...GOOD })).body.id;
+  await approve(o26, { capture_fault: "CARD_EXPIRED" });
+  const again1 = await rt(r6, o26, p26);
+  const again1j = (await again1.json()) as { status?: string; issue?: string; attempt?: number };
+  check("retry that fails again => 409 FAILED CARD_EXPIRED (attempt 1)", again1.status === 409 && again1j.issue === "CARD_EXPIRED" && again1j.attempt === 1, again1j);
+  const exc3 = (await (await dget("/api/admin/exceptions", dcookie)).json()) as { exceptions: Array<{ orderId: string; attempt: number }> };
+  check("order still queued with attempt = 1; no capture happened", exc3.exceptions.find((x) => x.orderId === o26)?.attempt === 1 && (await simOrder(o26)).captures === 0, exc3.exceptions.find((x) => x.orderId === o26));
+  const again2j = (await (await rt(r7, o26, p26)).json()) as { attempt?: number };
+  check("next retry increments to attempt 2", again2j.attempt === 2, again2j);
 
   section("S15 Audit chain integrity after everything above (incl. concurrent writes)");
   check("hash chain verifies end-to-end", (await verifyStoredChain()) === null, await verifyStoredChain());

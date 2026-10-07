@@ -1,20 +1,17 @@
 import { Suspense } from "react";
 import { cookies } from "next/headers";
+import { connection } from "next/server";
 import { hasDb } from "@/lib/db/client.ts";
-import { recentValidations, tenantName } from "@/lib/db/store.ts";
+import { tenantName } from "@/lib/db/store.ts";
 import { verifyStoredChain } from "@/lib/db/audit.ts";
 import { verifyAnchors } from "@/lib/db/anchor.ts";
 import { readSession, SESSION_COOKIE } from "@/lib/auth/session.ts";
 import { LoginForm, LogoutButton } from "./auth-forms.tsx";
-
-const tone: Record<string, string> = {
-  ALLOW: "text-emerald-700 bg-emerald-50",
-  REQUIRE_REAUTH: "text-amber-700 bg-amber-50",
-  DENY: "text-red-700 bg-red-50",
-};
+import { DashboardClient } from "./dashboard-client.tsx";
 
 async function Dashboard() {
-  // Reading cookies makes this per-request (no caching of tenant data).
+  // Per-request only: never prerender or cache tenant data (also keeps `new Date()` in readSession legal).
+  await connection();
   const jar = await cookies();
   let session = null;
   try { session = readSession(jar.get(SESSION_COOKIE)?.value); } catch { /* SESSION_SECRET missing => treated as logged out */ }
@@ -29,13 +26,12 @@ async function Dashboard() {
     );
   }
 
-  let rows: Awaited<ReturnType<typeof recentValidations>> = [];
   let name: string | null = null;
   let chain: number | null | "unavailable" = "unavailable";
   let anchors: Awaited<ReturnType<typeof verifyAnchors>> | null = null;
   if (hasDb()) {
     try {
-      [rows, name, chain, anchors] = await Promise.all([recentValidations(session.tenantId), tenantName(session.tenantId), verifyStoredChain(), verifyAnchors()]);
+      [name, chain, anchors] = await Promise.all([tenantName(session.tenantId), verifyStoredChain(), verifyAnchors()]);
     } catch { /* render degraded view */ }
   }
 
@@ -56,21 +52,7 @@ async function Dashboard() {
         {!anchors ? <b>unavailable</b> : anchors.checked === 0 ? <b className="text-amber-700">none yet</b> : anchors.mismatched.length ? <b className="text-red-700">MISMATCH at #{anchors.mismatched.join(", #")}</b> : <b className="text-emerald-700">{anchors.checked} verified ({anchors.lastSink})</b>}
       </p>
 
-      <h2 className="mt-8 mb-2 font-medium">Recent cart validations</h2>
-      <table className="w-full text-sm">
-        <thead><tr className="text-left text-neutral-500"><th>#</th><th>Cart</th><th>Decision</th><th>Violations</th><th>When</th></tr></thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.id} className="border-t">
-              <td>{r.id}</td><td>{r.cartId}</td>
-              <td><span className={`rounded px-2 py-0.5 ${tone[r.decision] ?? ""}`}>{r.decision}</span></td>
-              <td>{(r.violations as { code: string }[]).map((v) => v.code).join(", ") || "—"}</td>
-              <td>{new Date(r.at).toLocaleString()}</td>
-            </tr>
-          ))}
-          {rows.length === 0 && <tr><td colSpan={5} className="py-6 text-neutral-500">No validations yet.</td></tr>}
-        </tbody>
-      </table>
+      <DashboardClient />
       <p className="mt-6 text-xs text-neutral-500">Read-only session (30 min). Only your tenant&apos;s data is shown.</p>
     </main>
   );

@@ -174,6 +174,14 @@ const server = http.createServer(async (req, res) => {
       const result = await deliver("CHECKOUT.ORDER.APPROVED", publicOrder(o), b.webhook_fault ?? "none");
       return send(res, 200, { orderId: o.id, deliveries: result });
     }
+    // Change/clear the capture fault WITHOUT re-firing the approval webhook (used to test exception re-triggers).
+    const fl = m(/^\/sim\/orders\/([^/]+)\/fault$/);
+    if (req.method === "POST" && fl) {
+      const o = orders.get(fl[1]);
+      if (!o) return send(res, 404, { error: "no such order" });
+      o.captureFault = ((await readJson(req)) ?? {}).capture_fault ?? "none";
+      return send(res, 200, { orderId: o.id, captureFault: o.captureFault });
+    }
     const st = m(/^\/sim\/orders\/([^/]+)$/);
     if (req.method === "GET" && st) {
       const o = orders.get(st[1]);

@@ -117,3 +117,47 @@ export async function recordSpend(policyId: string, captureId: string, amount: n
   );
   return (rowCount ?? 0) === 1;
 }
+
+/* ---------------- dashboard reads (always tenant-scoped) ---------------- */
+
+/** Keyset pagination (stable under inserts): pass the smallest id from the previous page as `before`. */
+export async function validationsPage(tenantId: string, o: { limit: number; before?: number; decision?: string }) {
+  const { rows } = await db().query(
+    `SELECT v.id::int AS id, v.policy_id AS "policyId", v.cart_id AS "cartId", v.decision, v.violations, v.at
+       FROM validations v JOIN policies p ON p.id = v.policy_id
+      WHERE p.owner_id = $1 AND ($2::bigint IS NULL OR v.id < $2) AND ($3::text IS NULL OR v.decision = $3)
+      ORDER BY v.id DESC LIMIT $4`,
+    [tenantId, o.before ?? null, o.decision ?? null, o.limit],
+  );
+  return rows;
+}
+
+export async function listPolicies(tenantId: string, limit = 50) {
+  const { rows } = await db().query(
+    `SELECT id, status, source_text AS "sourceText", compiled, compiled_hash AS "hash", created_at AS "createdAt", confirmed_at AS "confirmedAt"
+       FROM policies WHERE owner_id = $1 ORDER BY created_at DESC LIMIT $2`,
+    [tenantId, limit],
+  );
+  return rows;
+}
+
+/**
+ * Orders whose capture failed and which have NOT since been captured. `attempt` is the highest
+ * attempt number used so far (0 = the original automatic attempt).
+ */
+export async function openCaptureFailures(tenantId: string, limit = 50) {
+  const { rows } = await db().query(
+    `SELECT DISTINCT ON (a.payload->>'orderId')
+            a.payload->>'orderId' AS "orderId", a.payload->>'policyId' AS "policyId", a.payload->>'issue' AS issue,
+            (a.payload->>'ambiguous')::boolean AS ambiguous, a.payload->'action'->>'type' AS "actionType", a.at,
+            COALESCE((SELECT max((r.payload->>'attempt')::int) FROM audit_log r
+                       WHERE r.kind = 'order.capture_retriggered' AND r.payload->>'orderId' = a.payload->>'orderId'), 0) AS attempt
+       FROM audit_log a JOIN policies p ON p.id::text = a.payload->>'policyId'
+      WHERE a.kind = 'order.capture_failed' AND p.owner_id = $1
+        AND NOT EXISTS (SELECT 1 FROM audit_log c WHERE c.kind = 'order.captured' AND c.payload->>'orderId' = a.payload->>'orderId')
+      ORDER BY a.payload->>'orderId', a.seq DESC
+      LIMIT $2`,
+    [tenantId, limit],
+  );
+  return rows as Array<{ orderId: string; policyId: string; issue: string | null; ambiguous: boolean; actionType: string; at: string; attempt: number }>;
+}
