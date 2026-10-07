@@ -7,11 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test tests/core.test.ts tests/sim.test.ts",
+    "test": "node --test tests/core.test.ts tests/sim.test.ts tests/phase4.test.ts",
     "typecheck": "next typegen && tsc --noEmit",
     "db:migrate": "node --env-file=.env.local scripts/migrate.mjs",
     "sim": "node tools/paypal-sim/server.mjs",
-    "e2e:sim": "node --env-file=.env.local scripts/e2e-sim.ts"
+    "e2e:sim": "node --env-file=.env.local scripts/e2e-sim.ts",
+    "admin": "node --env-file=.env.local scripts/admin-cli.ts"
   },
   "dependencies": {
     "@google/genai": "^2.27.0",

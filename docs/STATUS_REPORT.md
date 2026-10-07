@@ -63,3 +63,14 @@ The six recommendations from the concept assessment were actioned. A working, te
 - **Two real bugs found and fixed** (audit seq string concat; undefined-in-hash). Dev DB test rows were reset twice with explicit approval.
 - **Unit tests**: 25/25. **Dependency audit**: see `docs/DEPENDENCY_AUDIT.md` (production deps clean).
 - **Still open**: Gemini generation blocked by depleted AI Studio credits (compiler untested live); PayPal sandbox access (O2/O5); Store Sync baselines (O3); auth/tenant isolation/rate limits; AG Grid (no Enterprise licence — Community/TanStack planned).
+
+---
+## Update 2026-10-07 (2) — Phase 4 hardening + agentic surface
+- **Auth**: DB-backed, hashed, revocable, expiring, tenant-scoped API keys (`agent`/`admin`); admin TOTP (RFC 6238, verified against the RFC vectors) required for policy confirmation and dashboard login; TOTP seeds sealed with AES-256-GCM (`SENTINEL_MASTER_KEY`); env-based key lists removed. Operator CLI: `npm run admin`.
+- **Tenant isolation**: tenant comes from the key (the `ownerId` request field is gone); scoped reads/activation; merchants bound to one tenant and enforced on validate-cart and the webhook path (cross-tenant policy use / budget burning blocked).
+- **Rate limiting**: Postgres-backed, fail-closed; per-key, per-tenant (compile hourly + daily quota), per-IP and per-key login.
+- **Audit anchoring (O4, partial)**: append-only anchors + optional HMAC-signed external sink; verified against the live chain and shown on the dashboard. Without `ANCHOR_SINK_URL` this does not stop a DB superuser.
+- **Dashboard**: session-gated, tenant-scoped, read-only (AG Grid still deferred; no Enterprise licence).
+- **Agentic**: operator assistant (Gemini function-calling, read-only/dry-run tools, tenant-bound) and an OpenAPI tool spec for Google Agent Studio (`docs/AGENT_STUDIO.md`).
+- **Verification**: unit tests 39/39 (incl. RFC 6238 vectors); e2e 86/86 against real Neon + simulator (tenant isolation, MFA replay, revocation/expiry, rate limits, cookie tamper, anchoring, concurrency, audit chain).
+- **Not done**: external IdP/SSO; managed secret store; live Gemini call (credits depleted); real Agent Studio project test; capture-provenance check (T21); AG Grid.

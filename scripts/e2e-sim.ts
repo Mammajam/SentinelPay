@@ -1,21 +1,29 @@
 // End-to-end scenarios against the LOCAL PayPal simulator + the real app + real Neon.
-//   npm run e2e:sim            (loads .env.local; needs DATABASE_URL)
+//   npm run e2e:sim            (loads .env.local; needs DATABASE_URL, SENTINEL_MASTER_KEY, SESSION_SECRET, CRON_SECRET)
 // The scenario runner only knows base URLs, so the same flow can later be pointed at
 // the real PayPal sandbox as a contract test (see docs/PAYPAL_SIMULATOR.md).
+// Every run creates fresh, uniquely-named tenants/merchants/keys; rows are permanent (append-only audit).
 import { spawn, type ChildProcess } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { Policy } from "../src/lib/policy/schema.ts";
 import { policyHash } from "../src/lib/policy/readback.ts";
-import { activatePolicy, insertDraftPolicy } from "../src/lib/db/store.ts";
+import { activatePolicy, createTenant, insertDraftPolicy, registerMerchant } from "../src/lib/db/store.ts";
 import { verifyStoredChain } from "../src/lib/db/audit.ts";
+import { createApiKey, revokeApiKey } from "../src/lib/auth/keys.ts";
+import { stepAt, totpCode } from "../src/lib/auth/totp.ts";
 import { db } from "../src/lib/db/client.ts";
 import { mitigationFor } from "../src/lib/paypal/errors.ts";
 
-if (!process.env.DATABASE_URL) { console.error("DATABASE_URL missing (run via npm run e2e:sim)"); process.exit(1); }
+for (const v of ["DATABASE_URL", "SENTINEL_MASTER_KEY", "SESSION_SECRET", "CRON_SECRET"]) {
+  if (!process.env[v]) { console.error(`${v} missing (run via npm run e2e:sim; see .env.example)`); process.exit(1); }
+}
 
 const SIM_PORT = 4010, APP_PORT = 3918;
 const SIM = `http://localhost:${SIM_PORT}`, APP = `http://localhost:${APP_PORT}`;
-const AGENT_KEY = randomUUID().replace(/-/g, "");
+const RUN = randomUUID().slice(0, 8);
+const TA = `e2e-a-${RUN}`, TB = `e2e-b-${RUN}`, MA = `MA-${RUN}`, MB = `MB-${RUN}`;
+const FAKE_IP = `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`; // fresh rate-limit buckets per run
+
 const childEnv = {
   ...process.env,
   SIM_PORT: String(SIM_PORT),
@@ -25,9 +33,8 @@ const childEnv = {
   PAYPAL_WEBHOOK_ID: "SIM-WEBHOOK-ID",
   PAYPAL_CLIENT_ID: "sim",
   PAYPAL_CLIENT_SECRET: "sim",
-  SENTINEL_AGENT_KEYS: createHash("sha256").update(AGENT_KEY).digest("hex"),
+  RL_VALIDATE_PER_MIN: "30",
 };
-// Make this process's PayPal client talk to the simulator too (scenario S12).
 Object.assign(process.env, { PAYPAL_BASE_URL: SIM, PAYPAL_CLIENT_ID: "sim", PAYPAL_CLIENT_SECRET: "sim" });
 
 /* ---------------- tiny harness ---------------- */
@@ -58,16 +65,21 @@ process.on("exit", stopAll);
 interface Delivery { eventType: string; status: number; body: string }
 interface SimOrder { status: string; captures: number }
 
-async function makePolicy(rules: unknown[]): Promise<string> {
+async function makePolicy(tenantId: string, rules: unknown[]): Promise<string> {
   const compiled = Policy.parse({ version: 1, currency: "USD", rules });
   const hash = policyHash(compiled);
-  const id = await insertDraftPolicy({ ownerId: "e2e", sourceText: "e2e scenario", compiled, hash, compiler: "e2e" });
-  if (!(await activatePolicy(id, hash, "e2e"))) throw new Error("activation failed");
+  const id = await insertDraftPolicy({ ownerId: tenantId, sourceText: "e2e scenario", compiled, hash, compiler: "e2e" });
+  if (!(await activatePolicy(id, hash, "e2e", tenantId))) throw new Error("activation failed");
   return id;
+}
+async function makeDraft(tenantId: string) {
+  const compiled = Policy.parse({ version: 1, currency: "USD", rules: HAPPY });
+  const hash = policyHash(compiled);
+  return { id: await insertDraftPolicy({ ownerId: tenantId, sourceText: "draft", compiled, hash, compiler: "e2e" }), hash };
 }
 const HAPPY = [{ kind: "max_total", amount: 120_000 }, { kind: "max_tax_shipping", amount: 15_000 }];
 
-async function createOrder(o: { policyId: string; item: string; tax?: string; ship?: string; invoice?: string; total: string }) {
+async function createOrder(o: { policyId: string; item: string; tax?: string; ship?: string; invoice?: string; total: string; merchant?: string }) {
   const res = await fetch(`${SIM}/v2/checkout/orders`, {
     method: "POST",
     headers: { authorization: "Bearer x", "content-type": "application/json", "paypal-request-id": randomUUID() },
@@ -76,7 +88,7 @@ async function createOrder(o: { policyId: string; item: string; tax?: string; sh
       purchase_units: [{
         custom_id: o.policyId,
         invoice_id: o.invoice ?? `INV-${randomUUID()}`,
-        payee: { merchant_id: "MERCH1" },
+        payee: { merchant_id: o.merchant ?? MA },
         amount: { currency_code: "USD", value: o.total, breakdown: { item_total: { currency_code: "USD", value: o.item }, tax_total: { currency_code: "USD", value: o.tax ?? "80.00" }, shipping: { currency_code: "USD", value: o.ship ?? "20.00" } } },
         items: [{ name: "Laptop", sku: "LAP1", quantity: "1", unit_amount: { currency_code: "USD", value: o.item } }],
       }],
@@ -95,6 +107,16 @@ const ledger = async (policyId: string) =>
   (await db().query("SELECT amount::int AS amount FROM spend_ledger WHERE policy_id = $1", [policyId])).rows as Array<{ amount: number }>;
 
 const GOOD = { item: "1000.00", total: "1100.00" }; // 100000 + 8000 + 2000 = 110000 minor
+const cartFor = (merchantId: string, cartId = "c-e2e", over: Record<string, unknown> = {}) => ({
+  cartId, merchantId, currency: "USD", lines: [{ sku: "LAP1", quantity: 1, unitPrice: 100_000 }], tax: 8_000, shipping: 2_000, total: 110_000, ...over,
+});
+const api = (path: string, key: string | null, body?: unknown, extra: Record<string, string> = {}, method = "POST") =>
+  fetch(`${APP}${path}`, {
+    method,
+    headers: { "content-type": "application/json", "x-forwarded-for": FAKE_IP, ...(key ? { authorization: `Bearer ${key}` } : {}), ...extra },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+const code = (secret: string, offset = 0) => totpCode(secret, stepAt(new Date()) + offset);
 
 async function run() {
   section("Booting simulator + app (next dev) ...");
@@ -104,21 +126,30 @@ async function run() {
   check("app is up", Boolean(await until(async () => (await fetch(APP).catch(() => null))?.ok, 120_000)));
   await fetch(`${SIM}/sim/reset`, { method: "POST" });
 
+  // Two tenants, each with its own merchant and keys.
+  await createTenant(TA, `Tenant A ${RUN}`); await createTenant(TB, `Tenant B ${RUN}`);
+  await registerMerchant(TA, MA); await registerMerchant(TB, MB);
+  const adminA = await createApiKey({ tenantId: TA, role: "admin", label: "e2e confirm" });
+  const adminLogin = await createApiKey({ tenantId: TA, role: "admin", label: "e2e login" });
+  const adminA2 = await createApiKey({ tenantId: TA, role: "admin", label: "e2e confirm 2" }); // TOTP codes are single-use, so each step gets its own key
+  const adminB = await createApiKey({ tenantId: TB, role: "admin", label: "e2e" });
+  const agentA = await createApiKey({ tenantId: TA, role: "agent", label: "e2e" });
+  const agentB = await createApiKey({ tenantId: TB, role: "agent", label: "e2e" });
+
   section("S1  Happy path: within limits => inspect ALLOW => capture => ledger");
-  const p1 = await makePolicy(HAPPY);
+  const p1 = await makePolicy(TA, HAPPY);
   const o1 = (await createOrder({ policyId: p1, ...GOOD })).body.id;
   const d1 = await approve(o1);
   check("webhook accepted (200)", d1[0]?.status === 200, d1[0]);
   const s1 = await simOrder(o1);
   check("order COMPLETED with exactly 1 capture", s1.status === "COMPLETED" && s1.captures === 1, s1);
   check("ledger has exactly 1 row of 110000", await until(async () => { const l = await ledger(p1); return l.length === 1 && l[0].amount === 110_000; }) !== undefined, await ledger(p1));
-  // capture.recorded is written just after the ledger row (async webhook), so wait for it.
   await until(async () => (await audit(p1)).some((e) => e.kind === "capture.recorded"));
   const a1 = (await audit(p1)).map((e) => e.kind);
   check("audit: order.inspected, order.captured, capture.recorded", ["order.inspected", "order.captured", "capture.recorded"].every((k) => a1.includes(k)), a1);
 
   section("S2  Over limit => REQUIRE_REAUTH, NO capture");
-  const p2 = await makePolicy(HAPPY);
+  const p2 = await makePolicy(TA, HAPPY);
   const o2 = (await createOrder({ policyId: p2, item: "1150.00", total: "1250.00" })).body.id;
   const d2 = await approve(o2);
   const a2 = await audit(p2);
@@ -130,7 +161,7 @@ async function run() {
 
   section("S3-S5  Forged webhooks are rejected, nothing captured");
   for (const [fault, label] of [["tamper", "tampered body"], ["stale", "stale timestamp"], ["badcert", "untrusted cert URL"]] as const) {
-    const pol = await makePolicy(HAPPY);
+    const pol = await makePolicy(TA, HAPPY);
     const o = (await createOrder({ policyId: pol, ...GOOD })).body.id;
     const d = await approve(o, { webhook_fault: fault });
     const s = await simOrder(o);
@@ -139,7 +170,7 @@ async function run() {
   }
 
   section("S6  Replayed webhook is processed once");
-  const p6 = await makePolicy(HAPPY);
+  const p6 = await makePolicy(TA, HAPPY);
   const o6 = (await createOrder({ policyId: p6, ...GOOD })).body.id;
   const d6 = await approve(o6, { webhook_fault: "replay" });
   check("1st delivery processed, 2nd flagged replay", d6[0]?.status === 200 && !d6[0].body.includes("replay") && d6[1]?.body.includes('"replay":true'), d6);
@@ -147,7 +178,7 @@ async function run() {
   check("exactly 1 capture and 1 ledger row", (await simOrder(o6)).captures === 1 && (await ledger(p6)).length === 1);
 
   section("S7  CARD_EXPIRED at capture => FAILED, invalidate token, no ledger");
-  const p7 = await makePolicy(HAPPY);
+  const p7 = await makePolicy(TA, HAPPY);
   const o7 = (await createOrder({ policyId: p7, ...GOOD })).body.id;
   await approve(o7, { capture_fault: "CARD_EXPIRED" });
   const f7 = (await audit(p7)).find((e) => e.kind === "order.capture_failed");
@@ -155,7 +186,7 @@ async function run() {
   check("no ledger row", (await ledger(p7)).length === 0);
 
   section("S8  Processor 503 at capture => AMBIGUOUS, never blind-retried");
-  const p8 = await makePolicy(HAPPY);
+  const p8 = await makePolicy(TA, HAPPY);
   const o8 = (await createOrder({ policyId: p8, ...GOOD })).body.id;
   await approve(o8, { capture_fault: "PROCESSOR_UNAVAILABLE" });
   const f8 = (await audit(p8)).find((e) => e.kind === "order.capture_failed");
@@ -170,7 +201,7 @@ async function run() {
   check("no capture", (await simOrder(o9)).captures === 0);
 
   section("S10 price_drift with no catalog baseline => DENY (fail-closed, open item O3)");
-  const p10 = await makePolicy([...HAPPY, { kind: "price_drift", toleranceBps: 0, maxBaselineAgeSec: 86_400 }]);
+  const p10 = await makePolicy(TA, [...HAPPY, { kind: "price_drift", toleranceBps: 0, maxBaselineAgeSec: 86_400 }]);
   const o10 = (await createOrder({ policyId: p10, ...GOOD })).body.id;
   await approve(o10);
   check("DENY audited", (await audit(p10)).find((e) => e.kind === "order.inspected")?.payload.decision === "DENY");
@@ -186,33 +217,140 @@ async function run() {
 
   section("S12 Double-capture protection (idempotency key + PayPal state)");
   const { captureOrder } = await import("../src/lib/paypal/capture.ts");
-  const again = await captureOrder({ orderId: o1, policyId: p1 }); // SAME deterministic request id as the app used
+  const again = await captureOrder({ orderId: o1, policyId: p1 });
   check("same request id => replayed result, still CAPTURED", again.status === "CAPTURED", again);
-  const newAttempt = await captureOrder({ orderId: o1, policyId: p1, attempt: 1 }); // different key
+  const newAttempt = await captureOrder({ orderId: o1, policyId: p1, attempt: 1 });
   check("different request id => ORDER_ALREADY_CAPTURED (refused)", newAttempt.status === "FAILED" && newAttempt.issue === "ORDER_ALREADY_CAPTURED", newAttempt);
   check("simulator still shows exactly 1 capture", (await simOrder(o1)).captures === 1);
 
-  section("S13 validate-cart API (agent key)");
-  const cart = { cartId: "c-e2e", merchantId: "MERCH1", currency: "USD", lines: [{ sku: "LAP1", quantity: 1, unitPrice: 100_000 }], tax: 8_000, shipping: 2_000, total: 110_000 };
-  const call = (key: string | null, body: unknown) => fetch(`${APP}/api/validate-cart`, { method: "POST", headers: { "content-type": "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) }, body: JSON.stringify(body) });
-  check("no key => 401", (await call(null, { policyId: p1, cart })).status === 401);
-  check("wrong key => 401", (await call("nope", { policyId: p1, cart })).status === 401);
-  const ok = await (await call(AGENT_KEY, { policyId: p1, cart })).json() as { decision: string };
+  section("S13 validate-cart API (agent key, own tenant)");
+  const cart = cartFor(MA);
+  check("no key => 401", (await api("/api/validate-cart", null, { policyId: p1, cart })).status === 401);
+  check("wrong key => 401", (await api("/api/validate-cart", "sp_agt_nope", { policyId: p1, cart })).status === 401);
+  const ok = await (await api("/api/validate-cart", agentA.key, { policyId: p1, cart })).json() as { decision: string };
   check("in-limit cart => ALLOW", ok.decision === "ALLOW", ok);
-  const over = await (await call(AGENT_KEY, { policyId: p1, cart: { ...cart, lines: [{ sku: "LAP1", quantity: 1, unitPrice: 115_000 }], total: 125_000 } })).json() as { decision: string };
+  const over = await (await api("/api/validate-cart", agentA.key, { policyId: p1, cart: cartFor(MA, "c-over", { lines: [{ sku: "LAP1", quantity: 1, unitPrice: 115_000 }], total: 125_000 }) })).json() as { decision: string };
   check("over-limit cart => REQUIRE_REAUTH", over.decision === "REQUIRE_REAUTH", over);
-  const lie = await (await call(AGENT_KEY, { policyId: p1, cart: { ...cart, total: 1 } })).json() as { decision: string };
+  const lie = await (await api("/api/validate-cart", agentA.key, { policyId: p1, cart: cartFor(MA, "c-lie", { total: 1 }) })).json() as { decision: string };
   check("agent lies about total => DENY", lie.decision === "DENY", lie);
-  const ghostRes = await call(AGENT_KEY, { policyId: randomUUID(), cart });
+  const ghostRes = await api("/api/validate-cart", agentA.key, { policyId: randomUUID(), cart });
   check("unknown policy => DENY (403)", ghostRes.status === 403 && ((await ghostRes.json()) as { decision: string }).decision === "DENY");
+  check("admin key on agent endpoint => 403", (await api("/api/validate-cart", adminA.key, { policyId: p1, cart })).status === 403);
 
   section("S14 Concurrency: 10 parallel approvals on one policy");
-  const p14 = await makePolicy(HAPPY);
+  const p14 = await makePolicy(TA, HAPPY);
   const ids = await Promise.all(Array.from({ length: 10 }, async () => (await createOrder({ policyId: p14, ...GOOD })).body.id));
   await Promise.all(ids.map((id) => approve(id)));
   const settled = await until(async () => (await ledger(p14)).length === 10, 30_000);
   check("10 captures, 10 ledger rows, no duplicates", Boolean(settled), (await ledger(p14)).length);
   check("every order captured exactly once", (await Promise.all(ids.map(simOrder))).every((s) => s.captures === 1));
+
+  /* ====================== Phase 4 ====================== */
+
+  section("S16 Tenant isolation: tenant B cannot see or use tenant A's policy");
+  const pB = await makePolicy(TB, HAPPY);
+  const xv = await api("/api/validate-cart", agentB.key, { policyId: p1, cart: cartFor(MB) });
+  check("B validating against A's policy => 403 DENY (same as missing)", xv.status === 403 && ((await xv.json()) as { decision: string }).decision === "DENY");
+  check("B reading A's policy => 404", (await api(`/api/agent/policies/${p1}`, agentB.key, undefined, {}, "GET")).status === 404);
+  const own = await api(`/api/agent/policies/${p1}`, agentA.key, undefined, {}, "GET");
+  const ownJson = (await own.json()) as { rules?: string[] };
+  check("A reading own policy => 200 with plain-language rules", own.status === 200 && Array.isArray(ownJson.rules) && ownJson.rules.length === 2, ownJson);
+  const bOk = await (await api("/api/validate-cart", agentB.key, { policyId: pB, cart: cartFor(MB, "cart-B-secret") })).json() as { decision: string };
+  check("B's own policy + merchant => ALLOW", bOk.decision === "ALLOW", bOk);
+
+  section("S17 Cross-tenant webhook: tenant B's order cannot use (or burn) A's policy");
+  const before = (await ledger(p1)).length;
+  const oX = (await createOrder({ policyId: p1, ...GOOD, merchant: MB })).body.id;
+  await approve(oX);
+  const xi = (await audit(p1)).filter((e) => e.kind === "order.inspected").find((e) => (e.payload.orderId as string) === oX);
+  check("DENY with merchant_not_registered_for_policy_tenant", xi?.payload.decision === "DENY" && xi.payload.detail === "merchant_not_registered_for_policy_tenant", xi?.payload);
+  check("not captured, A's ledger untouched", (await simOrder(oX)).captures === 0 && (await ledger(p1)).length === before);
+
+  section("S18 Unregistered merchant is DENIED even with a valid policy");
+  const um = await (await api("/api/validate-cart", agentA.key, { policyId: p1, cart: cartFor("SOMEONE-ELSE") })).json() as { decision: string; violations: Array<{ code: string }> };
+  check("DENY with MERCHANT_NOT_REGISTERED", um.decision === "DENY" && um.violations.some((v) => v.code === "MERCHANT_NOT_REGISTERED"), um);
+
+  section("S19 Policy confirmation needs admin key + single-use MFA + ownership");
+  const d19 = await makeDraft(TA);
+  const confirm = (key: string | null, totp: string | null, id: string, hash: string) =>
+    api("/api/policies/confirm", key, { id, hash }, totp ? { "x-sentinel-totp": totp } : {});
+  check("no key => 401", (await confirm(null, null, d19.id, d19.hash)).status === 401);
+  check("agent key => 403", (await confirm(agentA.key, "123456", d19.id, d19.hash)).status === 403);
+  check("admin key WITHOUT code => 401", (await confirm(adminA.key, null, d19.id, d19.hash)).status === 401);
+  check("admin key with WRONG code => 401", (await confirm(adminA.key, "000000", d19.id, d19.hash)).status === 401);
+  const wrongTenant = await confirm(adminB.key, code(adminB.totpSecret!), d19.id, d19.hash);
+  check("other tenant's admin + valid code => 409 (not yours)", wrongTenant.status === 409, wrongTenant.status);
+  const wrongHash = await confirm(adminA.key, code(adminA.totpSecret!), d19.id, "0".repeat(64));
+  check("owner + valid code but WRONG hash => 409", wrongHash.status === 409, wrongHash.status);
+  const confirmed = await confirm(adminA2.key, code(adminA2.totpSecret!), d19.id, d19.hash);
+  check("owner + valid code + right hash => 200", confirmed.status === 200, confirmed.status);
+  check("policy is now active", (await db().query("select status from policies where id=$1", [d19.id])).rows[0].status === "active");
+  const d19b = await makeDraft(TA);
+  const replay = await confirm(adminA2.key, code(adminA2.totpSecret!), d19b.id, d19b.hash);
+  check("re-using the same one-time code => 401 (replay blocked)", replay.status === 401, replay.status);
+  check("policy stayed draft after replay", (await db().query("select status from policies where id=$1", [d19b.id])).rows[0].status === "draft");
+
+  section("S20 Key lifecycle: revoked and expired keys stop working");
+  const tmp = await createApiKey({ tenantId: TA, role: "agent", label: "to-revoke" });
+  check("fresh key works", (await api("/api/validate-cart", tmp.key, { policyId: p1, cart })).status === 200);
+  check("revoke succeeds", await revokeApiKey(tmp.id, TA));
+  check("revoked key => 401", (await api("/api/validate-cart", tmp.key, { policyId: p1, cart })).status === 401);
+  check("revoking via the wrong tenant is refused", !(await revokeApiKey(agentA.id, TB)));
+  const expired = await createApiKey({ tenantId: TA, role: "agent", label: "expired", expiresAt: new Date(Date.now() - 60_000) });
+  check("expired key => 401", (await api("/api/validate-cart", expired.key, { policyId: p1, cart })).status === 401);
+
+  section("S21 Rate limiting (429 + Retry-After) is per key");
+  const rl = await createApiKey({ tenantId: TA, role: "agent", label: "rate" });
+  const statuses: number[] = [];
+  let retryAfter: string | null = null;
+  for (let i = 0; i < 36; i++) { const r = await api("/api/validate-cart", rl.key, {}); statuses.push(r.status); if (r.status === 429) retryAfter = r.headers.get("retry-after"); }
+  check("first 30 requests are not rate limited", statuses.slice(0, 30).every((s) => s !== 429), statuses.slice(0, 30));
+  check("requests beyond the limit => 429", statuses.slice(30).every((s) => s === 429), statuses.slice(30));
+  check("429 carries Retry-After", Number(retryAfter) > 0, retryAfter);
+  check("another key is unaffected", (await api("/api/validate-cart", agentB.key, { policyId: pB, cart: cartFor(MB) })).status === 200);
+
+  section("S22 Dashboard: MFA login, signed read-only cookie, tenant-scoped data");
+  const login = (key: string, totp: string) => api("/api/admin/login", null, { key, totp });
+  const lg = await login(adminLogin.key, code(adminLogin.totpSecret!));
+  const setCookie = lg.headers.get("set-cookie") ?? "";
+  check("valid key + code => 200", lg.status === 200, lg.status);
+  check("cookie is HttpOnly + SameSite=Strict", /HttpOnly/i.test(setCookie) && /SameSite=Strict/i.test(setCookie), setCookie.replace(/=[^;]+/, "=<redacted>"));
+  const cookie = setCookie.split(";")[0];
+  const page = await (await fetch(APP, { headers: { cookie } })).text();
+  check("signed-in page shows tenant A's name and its cart ids", page.includes(`Tenant A ${RUN}`) && page.includes("c-e2e"));
+  check("signed-in page does NOT leak tenant B's data", !page.includes("cart-B-secret") && !page.includes(`Tenant B ${RUN}`));
+  const anon = await (await fetch(APP)).text();
+  check("no cookie => sign-in form, no data", anon.includes("Operator sign-in") && !anon.includes("c-e2e"));
+  const forged = await (await fetch(APP, { headers: { cookie: cookie.replace(/.$/, (c) => (c === "A" ? "B" : "A")) } })).text();
+  check("tampered cookie => sign-in form", forged.includes("Operator sign-in") && !forged.includes("c-e2e"));
+  check("wrong code => 401", (await login(adminLogin.key, "000000")).status === 401);
+  check("agent key cannot log in (403→401 uniform)", (await login(agentA.key, "123456")).status === 401);
+  const logins: number[] = [];
+  for (let i = 0; i < 6; i++) logins.push((await login("sp_adm_" + "x".repeat(43), "000000")).status);
+  check("brute-force attempts hit the limiter (429)", logins.includes(429), logins);
+  const sessionOnApi = await fetch(`${APP}/api/policies/confirm`, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ id: d19b.id, hash: d19b.hash }) });
+  check("session cookie cannot call mutating APIs (needs Bearer + MFA)", sessionOnApi.status === 401, sessionOnApi.status);
+
+  section("S23 Audit anchoring");
+  const cron = process.env.CRON_SECRET!;
+  const anch = (method: string, secret: string | null) => fetch(`${APP}/api/admin/anchor`, { method, headers: secret ? { authorization: `Bearer ${secret}` } : {} });
+  check("no secret => 401", (await anch("POST", null)).status === 401);
+  check("wrong secret => 401", (await anch("POST", "x".repeat(40))).status === 401);
+  const made = await anch("POST", cron);
+  const madeJson = (await made.json()) as { seq?: number; sink?: string };
+  check("anchor created (sink=db without ANCHOR_SINK_URL)", made.status === 200 && Number(madeJson.seq) > 0 && madeJson.sink === "db", madeJson);
+  const ver = (await (await anch("GET", cron)).json()) as { checked: number; mismatched: number[] };
+  check("anchors verify against the live chain", ver.checked >= 1 && ver.mismatched.length === 0, ver);
+  const mutate = await db().query("UPDATE audit_anchors SET hash = 'x' WHERE seq = $1", [madeJson.seq]).then(() => "mutated", (e: Error) => e.message);
+  check("anchor table is append-only (UPDATE rejected)", mutate.includes("append-only"), mutate);
+
+  section("S24 Agent Studio surface + operator assistant");
+  const spec = (await (await fetch(`${APP}/api/agent/openapi`)).json()) as { paths: Record<string, unknown> };
+  check("OpenAPI lists only the two agent tools", Object.keys(spec.paths).sort().join() === "/api/agent/policies/{id},/api/validate-cart", Object.keys(spec.paths));
+  check("assistant: no key => 401", (await api("/api/agent/assistant", null, { question: "hello there" })).status === 401);
+  check("assistant: agent key => 403", (await api("/api/agent/assistant", agentA.key, { question: "hello there" })).status === 403);
+  const live = await api("/api/agent/assistant", adminA.key, { question: "How many of my recent carts were denied?" });
+  console.log(`  ℹ live assistant call (needs Gemini billing): HTTP ${live.status}${live.status === 200 ? " (model reachable)" : " (model unavailable/unfunded — not a code failure)"}`);
 
   section("S15 Audit chain integrity after everything above (incl. concurrent writes)");
   check("hash chain verifies end-to-end", (await verifyStoredChain()) === null, await verifyStoredChain());

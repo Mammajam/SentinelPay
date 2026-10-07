@@ -26,6 +26,9 @@ OAuth token · Orders v2 create/get/capture · `PayPal-Request-Id` idempotency �
 - The verifier trusts only `https://*.paypal.com` cert URLs. The simulator's `http://localhost` origin is allowed **only** when `devCertOrigin()` proves a local dev setup: `NODE_ENV != production`, loopback PayPal base URL, loopback `http` cert origin. Unit-tested in `tests/sim.test.ts`; `next start` (production) can never enable it.
 - `src/lib/paypal/client.ts` refuses `api-m.paypal.com` / `api.paypal.com` unless `PAYPAL_ALLOW_LIVE=1`.
 
+## Known gap: buyer/seller accounts are NOT modelled
+The simulator has no personal (buyer) or business (seller) accounts. A "seller" is only the `payee.merchant_id` string on an order (bound to a tenant in SentinelPay), and there is no payer identity, funding source, balance, login, or approval screen: approval is a simulator-only call. So it exercises SentinelPay's logic, not the buyer or seller *experience*. Adding it means: payer accounts with funding sources/balances (insufficient funds, expired card), a payer-approval step, merchant accounts with fee/payout and Seller-Protection states, and refunds/disputes. See the answer in the project notes before building.
+
 ## Contract-drift mitigation
 The scenario runner knows only base URLs. When sandbox access exists, point `PAYPAL_BASE_URL` at the sandbox and re-run the same flow as a contract test. Until then **O5 stays open**: simulator success does not prove real PayPal signatures or error enums.
 

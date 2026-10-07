@@ -3,7 +3,7 @@ import { verifyWebhook, devCertOrigin } from "@/lib/paypal/webhook.ts";
 import { orderToCart, toMinor } from "@/lib/paypal/orders.ts";
 import { captureOrder } from "@/lib/paypal/capture.ts";
 import { evaluate } from "@/lib/policy/evaluate.ts";
-import { claimWebhookEvent, getPolicy, recordSpend, releaseWebhookEvent, spentInWindow } from "@/lib/db/store.ts";
+import { claimWebhookEvent, getPolicy, merchantBelongsToTenant, recordSpend, releaseWebhookEvent, spentInWindow } from "@/lib/db/store.ts";
 import { appendAudit } from "@/lib/db/audit.ts";
 
 const certCache = new Map<string, string>();
@@ -68,7 +68,11 @@ export async function POST(req: Request) {
         const conv = orderToCart(order);
         policyId = conv.policyId;
         const policy = await getPolicy(conv.policyId);
-        if (policy?.status === "active") {
+        if (policy?.status === "active" && !(await merchantBelongsToTenant(conv.cart.merchantId, policy.ownerId))) {
+          // Cross-tenant guard: the order's merchant must belong to the policy's tenant, otherwise
+          // one tenant could apply (or burn the cumulative budget of) another tenant's policy.
+          detail = "merchant_not_registered_for_policy_tenant";
+        } else if (policy?.status === "active") {
           const windows = [...new Set(policy.compiled.rules.flatMap((r) => (r.kind === "cumulative_budget" ? [r.windowDays] : [])))];
           const sums = new Map(await Promise.all(windows.map(async (w) => [w, await spentInWindow(policy.id, w)] as const)));
           const r = evaluate(policy.compiled, conv.cart, { now: new Date(), spentInWindow: (w) => sums.get(w) ?? NaN });

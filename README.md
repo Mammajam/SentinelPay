@@ -13,15 +13,21 @@ Deterministic guardrail & verification proxy for agentic commerce on PayPal. Nex
 4. **Webhooks** — `POST /api/webhooks/paypal` verifies PayPal's signature, de-duplicates events, and inspects approved orders before any capture (capture call is a Phase 2 TODO).
 5. Everything is appended to a **hash-chained, append-only audit log**.
 
+## Auth model (Phase 4)
+Tenants own policies and PayPal merchants. Keys are tenant-scoped, hashed, revocable, expiring: `agent` (validate/read) and `admin` (manage). Policy confirmation and dashboard login need a one-time TOTP code. Dashboard sessions are read-only signed cookies. Rate limits are Postgres-backed. Audit-chain heads are anchored periodically. Details: `docs/THREAT_MODEL.md`, `docs/AGENT_STUDIO.md`.
+
 ## Setup
 ```bash
 npm install
 cp .env.example .env.local     # fill DATABASE_URL, GEAP_*/GOOGLE_API_KEY, key digests
 npm run db:migrate             # applies db/schema.sql to Neon
-npm test                       # 15 unit tests (node:test, no extra deps)
+npm test                       # 39 unit tests (node:test, no extra deps)
+npm run admin -- tenant --id acme --name "Acme" --merchant MERCHANT_ID
+npm run admin -- key --tenant acme --role admin   # prints key + TOTP secret once
+npm run e2e:sim                # 86 end-to-end checks (simulator + real app + Neon)
 npm run dev
 ```
-Create API keys: `k=$(openssl rand -hex 32); echo $k; printf %s $k | shasum -a 256` → put the **digest** in `SENTINEL_AGENT_KEYS` / `SENTINEL_ADMIN_KEYS`, give the key to the caller.
+Keys are created with `npm run admin` (no key lists in env). Generate `SENTINEL_MASTER_KEY`, `SESSION_SECRET`, `CRON_SECRET` as described in `.env.example`.
 
 ## Layout
 ```

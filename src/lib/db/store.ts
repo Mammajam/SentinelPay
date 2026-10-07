@@ -28,13 +28,48 @@ export async function getPolicy(id: string): Promise<PolicyRow | null> {
   return { ...rows[0], compiled } as PolicyRow;
 }
 
-/** Activates only if the caller echoes the exact hash they were shown. */
-export async function activatePolicy(id: string, hash: string, by: string): Promise<boolean> {
+/**
+ * Tenant-scoped read for authenticated API callers. A policy owned by another tenant is
+ * indistinguishable from a missing one (no existence oracle).
+ */
+export async function getPolicyForTenant(id: string, tenantId: string): Promise<PolicyRow | null> {
+  const p = await getPolicy(id);
+  return p && p.ownerId === tenantId ? p : null;
+}
+
+/** Activates only if the caller echoes the exact hash they were shown AND owns the policy. */
+export async function activatePolicy(id: string, hash: string, by: string, tenantId: string): Promise<boolean> {
   const { rowCount } = await db().query(
-    "UPDATE policies SET status='active', confirmed_by=$3, confirmed_at=now() WHERE id=$1 AND status='draft' AND compiled_hash=$2",
-    [id, hash, by],
+    "UPDATE policies SET status='active', confirmed_by=$3, confirmed_at=now() WHERE id=$1 AND status='draft' AND compiled_hash=$2 AND owner_id=$4",
+    [id, hash, by, tenantId],
   );
   return (rowCount ?? 0) === 1;
+}
+
+/* ---------------- tenants & merchant binding ---------------- */
+
+export async function createTenant(id: string, name: string) {
+  await db().query("INSERT INTO tenants (id, name) VALUES ($1,$2)", [id, name]);
+}
+
+/** A merchant can belong to exactly one tenant; re-registering under another tenant fails. */
+export async function registerMerchant(tenantId: string, merchantId: string) {
+  const { rows } = await db().query(
+    "INSERT INTO tenant_merchants (merchant_id, tenant_id) VALUES ($1,$2) ON CONFLICT (merchant_id) DO UPDATE SET tenant_id = tenant_merchants.tenant_id RETURNING tenant_id",
+    [merchantId, tenantId],
+  );
+  if (rows[0].tenant_id !== tenantId) throw new Error(`merchant ${merchantId} already belongs to another tenant`);
+}
+
+/** Fail-closed: an unregistered merchant belongs to nobody. */
+export async function merchantBelongsToTenant(merchantId: string, tenantId: string): Promise<boolean> {
+  const { rows } = await db().query("SELECT 1 FROM tenant_merchants WHERE merchant_id=$1 AND tenant_id=$2", [merchantId, tenantId]);
+  return rows.length === 1;
+}
+
+export async function tenantName(tenantId: string): Promise<string | null> {
+  const { rows } = await db().query("SELECT name FROM tenants WHERE id=$1", [tenantId]);
+  return rows[0]?.name ?? null;
 }
 
 /** Settled spend (minor units) within a window, for cumulative_budget. */
@@ -61,10 +96,10 @@ export async function recordValidation(policyId: string, cartId: string, decisio
   ]);
 }
 
-export async function recentValidations(limit = 50) {
+export async function recentValidations(tenantId: string, limit = 50) {
   const { rows } = await db().query(
-    "SELECT id, policy_id AS \"policyId\", cart_id AS \"cartId\", decision, violations, at FROM validations ORDER BY id DESC LIMIT $1",
-    [limit],
+    "SELECT v.id, v.policy_id AS \"policyId\", v.cart_id AS \"cartId\", v.decision, v.violations, v.at FROM validations v JOIN policies p ON p.id = v.policy_id WHERE p.owner_id = $1 ORDER BY v.id DESC LIMIT $2",
+    [tenantId, limit],
   );
   return rows;
 }
