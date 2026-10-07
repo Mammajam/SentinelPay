@@ -74,3 +74,12 @@ The six recommendations from the concept assessment were actioned. A working, te
 - **Agentic**: operator assistant (Gemini function-calling, read-only/dry-run tools, tenant-bound) and an OpenAPI tool spec for Google Agent Studio (`docs/AGENT_STUDIO.md`).
 - **Verification**: unit tests 39/39 (incl. RFC 6238 vectors); e2e 86/86 against real Neon + simulator (tenant isolation, MFA replay, revocation/expiry, rate limits, cookie tamper, anchoring, concurrency, audit chain).
 - **Not done**: external IdP/SSO; managed secret store; live Gemini call (credits depleted); real Agent Studio project test; capture-provenance check (T21); AG Grid.
+
+---
+## Update 2026-10-07 (3) — Phase 5: operator dashboard
+- **Dashboard**: Decisions (filter, keyset pagination, red rows for price/integrity violations), Policies (readback + hash; confirm with key + code), Exceptions (open capture failures + re-trigger). Plain React tables (TanStack Table v9 was evaluated and dropped: new API, no benefit here; AG Grid Enterprise unavailable).
+- **New read APIs** (session cookie only, tenant-scoped): `/api/admin/validations|policies|exceptions`. **New money-moving API**: `POST /api/admin/captures/retrigger` (admin key + single-use TOTP, queue-only, PayPal-state reconciliation, fresh policy check, idempotency-key reuse after ambiguous failure).
+- **Verified**: unit 39/39; e2e **120/120** (twice in a row); lint, typecheck, build clean. UI checked visually in the browser pane against a throwaway seeded tenant.
+- **Found by visual check and fixed**: Next prerender error (`new Date()` before request time), unreadable red rows in dark mode, misleading empty state while loading, scaffold tab title.
+- **Found by test**: a flaky replay test (TOTP window rollover) — fixed by reusing the identical code.
+- **All open work**: see `docs/REMINDERS.md`.

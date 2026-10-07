@@ -4,6 +4,8 @@
 
 Deterministic guardrail & verification proxy for agentic commerce on PayPal. Next.js 16 · Neon Postgres · GEAP/Gemini policy-compiler agent.
 
+> Open tasks & reminders: `docs/REMINDERS.md`.
+
 > Status: **sandbox-stage vertical slice.** Read `docs/STATUS_REPORT.md` first, then `docs/SPEC_ADDENDUM.md`, `docs/THREAT_MODEL.md`, `docs/COMPLIANCE_SCOPING.md`.
 
 ## How it works
@@ -12,6 +14,9 @@ Deterministic guardrail & verification proxy for agentic commerce on PayPal. Nex
 3. **Validate** — the agent calls `POST /api/validate-cart` (`agent` key). A pure, fail-closed evaluator returns `ALLOW | REQUIRE_REAUTH | DENY`.
 4. **Webhooks** — `POST /api/webhooks/paypal` verifies PayPal's signature, de-duplicates events, and inspects approved orders before any capture (capture call is a Phase 2 TODO).
 5. Everything is appended to a **hash-chained, append-only audit log**.
+
+## Dashboard (Phase 5)
+Session-gated, tenant-scoped, three tabs: **Decisions** (filter, keyset pagination, red rows for price/integrity violations), **Policies** (plain-language readback + hash; confirm needs key + one-time code), **Exceptions** (failed captures; re-trigger asks PayPal for the order's state, re-checks the policy, reuses the idempotency key after an ambiguous failure, and cannot double-capture).
 
 ## Auth model (Phase 4)
 Tenants own policies and PayPal merchants. Keys are tenant-scoped, hashed, revocable, expiring: `agent` (validate/read) and `admin` (manage). Policy confirmation and dashboard login need a one-time TOTP code. Dashboard sessions are read-only signed cookies. Rate limits are Postgres-backed. Audit-chain heads are anchored periodically. Details: `docs/THREAT_MODEL.md`, `docs/AGENT_STUDIO.md`.
@@ -24,7 +29,7 @@ npm run db:migrate             # applies db/schema.sql to Neon
 npm test                       # 39 unit tests (node:test, no extra deps)
 npm run admin -- tenant --id acme --name "Acme" --merchant MERCHANT_ID
 npm run admin -- key --tenant acme --role admin   # prints key + TOTP secret once
-npm run e2e:sim                # 86 end-to-end checks (simulator + real app + Neon)
+npm run e2e:sim                # 120 end-to-end checks (simulator + real app + Neon)
 npm run dev
 ```
 Keys are created with `npm run admin` (no key lists in env). Generate `SENTINEL_MASTER_KEY`, `SESSION_SECRET`, `CRON_SECRET` as described in `.env.example`.

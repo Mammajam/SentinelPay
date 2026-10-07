@@ -5,12 +5,12 @@
 ## Run
 ```bash
 npm run sim            # simulator on :4010 (webhooks -> SIM_WEBHOOK_URL, default :3000)
-npm run e2e:sim        # boots simulator + app, runs 41 checks against your Neon DB
+npm run e2e:sim        # boots simulator + app, runs 120 checks against your Neon DB
 ```
 `e2e:sim` writes test rows (owner `e2e`) to the database in `DATABASE_URL`. The audit log is append-only by design, so those rows are permanent; use a dev database.
 
 ## What it models
-OAuth token · Orders v2 create/get/capture · `PayPal-Request-Id` idempotency · `DUPLICATE_INVOICE_ID`, `AMOUNT_MISMATCH`, `ORDER_ALREADY_CAPTURED`, `CARD_EXPIRED`, 503 · signed webhooks (`id|time|webhookId|crc32(body)`, RSA-SHA256, cert served at `/v1/notifications/certs/CERT-SIM`) · webhook faults: `tamper`, `stale`, `badcert`, `replay`.
+OAuth token · Orders v2 create/get/capture · `PayPal-Request-Id` idempotency · `DUPLICATE_INVOICE_ID`, `AMOUNT_MISMATCH`, `ORDER_ALREADY_CAPTURED`, `CARD_EXPIRED`, 503 · signed webhooks (`id|time|webhookId|crc32(body)`, RSA-SHA256, cert served at `/v1/notifications/certs/CERT-SIM`) · webhook faults: `tamper`, `stale`, `badcert`, `replay`. `POST /sim/orders/:id/fault {capture_fault}` changes/clears a capture fault without re-firing the approval (used by the exception re-trigger tests).
 
 ## Simulator vs real PayPal sandbox
 | | Simulator | Sandbox |
