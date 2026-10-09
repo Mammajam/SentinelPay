@@ -5,15 +5,19 @@ import { captureOrder } from "@/lib/paypal/capture.ts";
 import { evaluate } from "@/lib/policy/evaluate.ts";
 import { claimWebhookEvent, getPolicy, merchantBelongsToTenant, recordSpend, releaseWebhookEvent, spentInWindow } from "@/lib/db/store.ts";
 import { appendAudit } from "@/lib/db/audit.ts";
+import { log } from "@/lib/log.ts";
 
-const certCache = new Map<string, string>();
+const CERT_TTL_MS = 60 * 60 * 1000;
+const CERT_MAX = 20;
+const certCache = new Map<string, { pem: string; at: number }>();
 async function fetchCertPem(url: string) {
   const hit = certCache.get(url);
-  if (hit) return hit;
+  if (hit && Date.now() - hit.at < CERT_TTL_MS) return hit.pem;
   const r = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(5000) });
   if (!r.ok) throw new Error("cert fetch failed");
   const pem = await r.text();
-  certCache.set(url, pem);
+  if (certCache.size >= CERT_MAX) certCache.delete(certCache.keys().next().value as string); // bounded
+  certCache.set(url, { pem, at: Date.now() });
   return pem;
 }
 
@@ -44,6 +48,7 @@ export async function POST(req: Request) {
   );
   if (!v.ok) {
     await appendAudit("webhook.rejected", { reason: v.reason }).catch(() => {});
+    log("WARNING", "webhook.rejected", { reason: v.reason });
     return Response.json({ error: "invalid_signature" }, { status: 400 });
   }
 
@@ -83,6 +88,7 @@ export async function POST(req: Request) {
         }
       } catch { /* stays DENY */ }
       await appendAudit("order.inspected", { eventId: evt.id, orderId, policyId, decision, detail });
+      log("INFO", "order.inspected", { decision });
 
       // Capture is initiated ONLY by SentinelPay and ONLY on ALLOW.
       if (decision === "ALLOW" && policyId && orderId) {
@@ -91,6 +97,7 @@ export async function POST(req: Request) {
           await appendAudit("order.captured", { orderId, policyId, captureId: out.captureId, requestId: out.requestId });
         } else {
           await appendAudit("order.capture_failed", { orderId, policyId, http: out.http, issue: out.issue, action: out.action, ambiguous: out.ambiguous, requestId: out.requestId });
+          log("ERROR", "order.capture_failed", { issue: out.issue, http: out.http, ambiguous: out.ambiguous });
         }
       }
     } else if (evt.event_type === "PAYMENT.CAPTURE.COMPLETED") {

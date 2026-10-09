@@ -12,7 +12,8 @@
     "db:migrate": "node --env-file=.env.local scripts/migrate.mjs",
     "sim": "node tools/paypal-sim/server.mjs",
     "e2e:sim": "node --env-file=.env.local scripts/e2e-sim.ts",
-    "admin": "node --env-file=.env.local scripts/admin-cli.ts"
+    "admin": "node --env-file=.env.local scripts/admin-cli.ts",
+    "loadtest": "node --env-file=.env.local scripts/loadtest.ts"
   },
   "dependencies": {
     "@google/genai": "^2.27.0",

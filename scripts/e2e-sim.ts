@@ -133,6 +133,9 @@ async function run() {
   const adminLogin = await createApiKey({ tenantId: TA, role: "admin", label: "e2e login" });
   const adminA2 = await createApiKey({ tenantId: TA, role: "admin", label: "e2e confirm 2" }); // TOTP codes are single-use, so each step gets its own key
   const adminB = await createApiKey({ tenantId: TB, role: "admin", label: "e2e" });
+  const adminRv1 = await createApiKey({ tenantId: TA, role: "admin", label: "e2e revoke 1" });
+  const adminRv2 = await createApiKey({ tenantId: TA, role: "admin", label: "e2e revoke 2" });
+  const adminRv3 = await createApiKey({ tenantId: TB, role: "admin", label: "e2e revoke other tenant" });
   const adminDash = await createApiKey({ tenantId: TA, role: "admin", label: "e2e dashboard session" });
   const adminB2 = await createApiKey({ tenantId: TB, role: "admin", label: "e2e retrigger (other tenant)" });
   const mkAdmin = (label: string) => createApiKey({ tenantId: TA, role: "admin", label }); // one key per TOTP-gated call (codes are single-use)
@@ -304,6 +307,9 @@ async function run() {
   check("expired key => 401", (await api("/api/validate-cart", expired.key, { policyId: p1, cart })).status === 401);
 
   section("S21 Rate limiting (429 + Retry-After) is per key");
+  // Fixed 60 s windows reset on the minute: start the burst early in a window so it cannot straddle a boundary.
+  const secIntoWindow = () => (Date.now() / 1000) % 60;
+  if (secIntoWindow() > 40) await new Promise((r) => setTimeout(r, (61 - secIntoWindow()) * 1000));
   const rl = await createApiKey({ tenantId: TA, role: "agent", label: "rate" });
   const statuses: number[] = [];
   let retryAfter: string | null = null;
@@ -426,6 +432,31 @@ async function run() {
   check("order still queued with attempt = 1; no capture happened", exc3.exceptions.find((x) => x.orderId === o26)?.attempt === 1 && (await simOrder(o26)).captures === 0, exc3.exceptions.find((x) => x.orderId === o26));
   const again2j = (await (await rt(r7, o26, p26)).json()) as { attempt?: number };
   check("next retry increments to attempt 2", again2j.attempt === 2, again2j);
+
+  section("S27 Kill-switch: revoking a policy stops validation AND capture immediately");
+  const pRv = await makePolicy(TA, HAPPY);
+  const rvCall = (k: { key: string; totpSecret?: string }, id: string, withCode = true) =>
+    api("/api/policies/revoke", k.key, { id }, withCode ? { "x-sentinel-totp": code(k.totpSecret!) } : {});
+  check("before revoke: cart ALLOWED", ((await (await api("/api/validate-cart", agentA.key, { policyId: pRv, cart: cartFor(MA, "c-rv") })).json()) as { decision: string }).decision === "ALLOW");
+  check("revoke without MFA => 401", (await rvCall(adminRv1, pRv, false)).status === 401);
+  check("agent key cannot revoke => 403", (await api("/api/policies/revoke", agentA.key, { id: pRv }, { "x-sentinel-totp": "123456" })).status === 403);
+  check("other tenant cannot revoke => 409 (and policy stays active)", (await rvCall(adminRv3, pRv)).status === 409 && (await db().query("select status from policies where id=$1", [pRv])).rows[0].status === "active");
+  const rv = await rvCall(adminRv1, pRv);
+  check("owner + MFA => 200 revoked", rv.status === 200 && ((await rv.json()) as { status: string }).status === "revoked");
+  const afterRv = await api("/api/validate-cart", agentA.key, { policyId: pRv, cart: cartFor(MA, "c-rv2") });
+  check("after revoke: validate-cart => 403 DENY", afterRv.status === 403 && ((await afterRv.json()) as { decision: string }).decision === "DENY");
+  const oRv = (await createOrder({ policyId: pRv, ...GOOD })).body.id;
+  await approve(oRv);
+  const rvAudit = (await audit(pRv)).find((e) => e.kind === "order.inspected" && e.payload.orderId === oRv);
+  check("after revoke: an approved order is DENIED and NOT captured", rvAudit?.payload.decision === "DENY" && rvAudit.payload.detail === "policy_not_active" && (await simOrder(oRv)).captures === 0, rvAudit?.payload);
+  check("revoking again => 409", (await rvCall(adminRv2, pRv)).status === 409);
+  check("policy_revoked is in the audit log", (await db().query("select 1 from audit_log where kind='policy.revoked' and payload->>'id'=$1", [pRv])).rows.length === 1);
+
+  section("S28 Health endpoints");
+  const hl = await fetch(`${APP}/api/health`);
+  check("/api/health => 200 ok", hl.status === 200 && ((await hl.json()) as { ok: boolean }).ok === true);
+  const rd = await fetch(`${APP}/api/ready`);
+  check("/api/ready => 200 (database reachable)", rd.status === 200 && ((await rd.json()) as { ready: boolean }).ready === true);
 
   section("S15 Audit chain integrity after everything above (incl. concurrent writes)");
   check("hash chain verifies end-to-end", (await verifyStoredChain()) === null, await verifyStoredChain());

@@ -5,7 +5,11 @@ import { open, seal } from "../src/lib/crypto/secretbox.ts";
 import { base32Decode, base32Encode, newTotpSecret, otpauthUri, stepAt, totpCode, verifyTotp } from "../src/lib/auth/totp.ts";
 import { readSession, signSession, SESSION_TTL_SEC } from "../src/lib/auth/session.ts";
 import { generateKey, hashKey } from "../src/lib/auth/keys.ts";
-import { mismatchedAnchors, signAnchor, verifyAnchorSignature } from "../src/lib/audit/anchor.ts";
+import { buildGcsUpload, mismatchedAnchors, signAnchor, verifyAnchorSignature } from "../src/lib/audit/anchor.ts";
+import { redact } from "../src/lib/log.ts";
+import { z } from "zod";
+import { Policy } from "../src/lib/policy/schema.ts";
+import { toModelSchema } from "../src/lib/agent/schema.ts";
 import { buildOpenApi } from "../src/lib/agent/openapi.ts";
 import { executeTool, runAssistant, TOOL_DECLARATIONS, type AssistantModel, type ToolBackend } from "../src/lib/agent/assistant.ts";
 
@@ -160,4 +164,46 @@ test("assistant: oversized tool results are truncated", async () => {
   const r = (await executeTool("list_recent_decisions", {}, big)) as { truncated?: boolean; preview?: string };
   assert.equal(r.truncated, true);
   assert.ok((r.preview?.length ?? 0) <= 8000);
+});
+
+/* ---------------- Phase 6a ---------------- */
+test("GCS anchor upload is create-only, deterministically named, and signed", () => {
+  const key = "k".repeat(40);
+  const a = { seq: 42, hash: "ab".repeat(32), at: "2026-10-08T12:00:00.000Z" };
+  const up = buildGcsUpload("my-bucket", a, key);
+  assert.equal(up.name, "anchors/000000000042-abababababab.json");
+  assert.match(up.url, /^https:\/\/storage\.googleapis\.com\/upload\/storage\/v1\/b\/my-bucket\/o\?/);
+  assert.match(up.url, /ifGenerationMatch=0/, "must never overwrite an existing anchor");
+  const body = JSON.parse(up.body) as { seq: number; hash: string; at: string; sig: string };
+  assert.equal(body.seq, 42);
+  assert.ok(verifyAnchorSignature({ seq: body.seq, hash: body.hash, at: body.at }, body.sig, key));
+  assert.equal(buildGcsUpload("b/../x", a, key).url.includes("b%2F..%2Fx"), true, "bucket name is URL-encoded");
+});
+test("log redaction hides secrets by key name, at any depth, and bounds size", () => {
+  const out = redact({ ok: 1, apiKey: "sp_adm_x", nested: { Authorization: "Bearer y", totpCode: "123456", fine: "v" }, list: [{ sessionId: "s" }], long: "x".repeat(1000) }) as {
+    ok: number; apiKey: string; nested: Record<string, string>; list: Array<Record<string, string>>; long: string;
+  };
+  assert.equal(out.apiKey, "[redacted]");
+  assert.equal(out.nested.Authorization, "[redacted]");
+  assert.equal(out.nested.totpCode, "[redacted]");
+  assert.equal(out.nested.fine, "v");
+  assert.equal(out.list[0].sessionId, "[redacted]");
+  assert.ok(String(out.long).length < 400);
+  assert.equal(out.ok, 1);
+});
+
+test("model schema: Vertex-incompatible keywords are removed, structure and required fields are kept", () => {
+  const out = JSON.stringify(toModelSchema(z.toJSONSchema(Policy)));
+  for (const bad of ["$schema", "additionalProperties", "pattern", "format", "minItems", "maxItems", "\"default\"", "\"const\"", "oneOf"]) {
+    assert.equal(out.includes(bad), false, `still contains ${bad}`);
+  }
+  assert.match(out, /"anyOf"/);
+  assert.match(out, /"enum":\["max_total"\]/, "const became a single-value enum");
+  assert.match(out, /"required":\["version","currency","rules"\]/);
+});
+test("loosening the model schema does not loosen validation: Policy still rejects what the schema no longer forbids", () => {
+  assert.equal(Policy.safeParse({ version: 1, currency: "usd", rules: [{ kind: "max_total", amount: 1 }] }).success, false, "currency pattern still enforced by Zod");
+  assert.equal(Policy.safeParse({ version: 1, currency: "USD", rules: [] }).success, false, "min rule count still enforced");
+  assert.equal(Policy.safeParse({ version: 1, currency: "USD", rules: Array.from({ length: 51 }, () => ({ kind: "max_total", amount: 1 })) }).success, false, "max rule count still enforced");
+  assert.equal(Policy.safeParse({ version: 1, currency: "USD", rules: [{ kind: "max_total", amount: 12.5 }] }).success, false, "integer cents still enforced");
 });

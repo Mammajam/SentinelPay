@@ -3,6 +3,7 @@ import { authenticateToken, hashKey } from "@/lib/auth/keys.ts";
 import { SESSION_COOKIE, SESSION_TTL_SEC, signSession } from "@/lib/auth/session.ts";
 import { clientIp, guard, LIMITS } from "@/lib/ratelimit.ts";
 import { appendAudit } from "@/lib/db/audit.ts";
+import { log } from "@/lib/log.ts";
 
 const Body = z.object({ key: z.string().min(10).max(200), totp: z.string().regex(/^\d{6}$/) });
 
@@ -23,6 +24,7 @@ export async function POST(req: Request) {
   const auth = await authenticateToken(body.data.key, "admin", body.data.totp);
   if (!auth.ok) {
     await appendAudit("admin.login_failed", { reason: auth.code }).catch(() => {});
+    log("WARNING", "admin.login_failed", { reason: auth.code });
     // Uniform message: do not reveal whether the key or the code was wrong.
     return Response.json({ error: "invalid_credentials" }, { status: auth.status === 503 ? 503 : 401 });
   }

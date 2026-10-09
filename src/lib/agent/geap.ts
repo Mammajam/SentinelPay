@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import { Policy } from "../policy/schema.ts";
+import { toModelSchema } from "./schema.ts";
 
 /**
  * Policy compiler agent (natural language -> candidate Policy v1).
@@ -54,7 +55,7 @@ export class GeapPolicyCompiler implements PolicyCompiler {
         systemInstruction: SYSTEM,
         temperature: 0,
         responseMimeType: "application/json",
-        responseJsonSchema: z.toJSONSchema(Policy),
+        responseJsonSchema: toModelSchema(z.toJSONSchema(Policy)), // loosened for Vertex; the strict Zod parse below is the real check
       },
     });
     const parsed = Policy.safeParse(JSON.parse(res.text ?? "null"));

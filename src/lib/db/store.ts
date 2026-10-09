@@ -46,6 +46,15 @@ export async function activatePolicy(id: string, hash: string, by: string, tenan
   return (rowCount ?? 0) === 1;
 }
 
+/** Kill-switch: a revoked policy can never validate or authorize a capture again. Draft or active only. */
+export async function revokePolicy(id: string, tenantId: string): Promise<boolean> {
+  const { rowCount } = await db().query(
+    "UPDATE policies SET status='revoked' WHERE id=$1 AND owner_id=$2 AND status IN ('draft','active')",
+    [id, tenantId],
+  );
+  return (rowCount ?? 0) === 1;
+}
+
 /* ---------------- tenants & merchant binding ---------------- */
 
 export async function createTenant(id: string, name: string) {

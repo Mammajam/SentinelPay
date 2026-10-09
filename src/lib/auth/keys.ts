@@ -37,6 +37,25 @@ export async function revokeApiKey(id: string, tenantId: string): Promise<boolea
   return (r.rowCount ?? 0) === 1;
 }
 
+/** Operator view of a tenant's keys. Never returns hashes or secrets. */
+export async function listApiKeys(tenantId: string) {
+  const { rows } = await db().query(
+    `SELECT id, role, label, prefix, created_at AS "createdAt", expires_at AS "expiresAt", revoked_at AS "revokedAt", last_used_at AS "lastUsedAt"
+       FROM api_keys WHERE tenant_id = $1 ORDER BY created_at DESC`,
+    [tenantId],
+  );
+  return rows as Array<{ id: string; role: Role; label: string; prefix: string; createdAt: string; expiresAt: string | null; revokedAt: string | null; lastUsedAt: string | null }>;
+}
+
+/** Issue a replacement (same role/label) THEN revoke the old key, so there is never a window with no valid key. */
+export async function rotateApiKey(id: string, tenantId: string) {
+  const old = (await listApiKeys(tenantId)).find((k) => k.id === id && !k.revokedAt);
+  if (!old) throw new Error("no active key with that id in that tenant");
+  const fresh = await createApiKey({ tenantId, role: old.role, label: old.label, expiresAt: old.expiresAt ? new Date(old.expiresAt) : undefined });
+  await revokeApiKey(id, tenantId);
+  return fresh;
+}
+
 const bearer = (req: Request) => /^Bearer\s+(\S+)$/i.exec(req.headers.get("authorization") ?? "")?.[1];
 
 export async function authenticate(req: Request, role: Role, opts: { totp?: boolean } = {}): Promise<AuthResult> {

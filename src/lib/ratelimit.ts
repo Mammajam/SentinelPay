@@ -1,4 +1,5 @@
 import { db } from "./db/client.ts";
+import { log } from "./log.ts";
 
 /**
  * Fixed-window rate limiting backed by Postgres, so limits hold across serverless instances
@@ -39,8 +40,10 @@ export async function guard(bucket: string, cfg: { limit: number; windowSec: num
   try {
     const r = await consume(bucket, cfg.limit, cfg.windowSec);
     if (r.allowed) return null;
+    log("WARNING", "rate_limited", { bucket: bucket.split(":").slice(0, 2).join(":"), retryAfterSec: r.retryAfterSec });
     return Response.json({ error: "rate_limited" }, { status: 429, headers: { "retry-after": String(r.retryAfterSec) } });
   } catch {
+    log("ERROR", "rate_limiter_unavailable", {});
     return Response.json({ error: "rate_limiter_unavailable" }, { status: 503 });
   }
 }

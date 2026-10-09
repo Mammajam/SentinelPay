@@ -126,6 +126,14 @@ function PoliciesTab() {
   const msg = note ?? res.error ?? null;
   const setMsg = setNote;
 
+  async function revoke(p: PolicyView, key: string, totp: string) {
+    setBusy(true); setMsg(null);
+    const r = await fetch("/api/policies/revoke", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}`, "x-sentinel-totp": totp }, body: JSON.stringify({ id: p.id }) });
+    setBusy(false);
+    setMsg(r.ok ? `Policy ${p.id.slice(0, 8)} revoked. No further orders can be authorized under it.` : "Revoke failed (check key and a fresh code).");
+    if (r.ok) { setOpen(null); setTick((t) => t + 1); }
+  }
+
   async function confirm(p: PolicyView, key: string, totp: string) {
     setBusy(true); setMsg(null);
     const r = await fetch("/api/policies/confirm", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}`, "x-sentinel-totp": totp }, body: JSON.stringify({ id: p.id, hash: p.hash }) });
@@ -148,6 +156,9 @@ function PoliciesTab() {
           <p className="mt-1 text-neutral-600">“{p.directive}”</p>
           <ul className="mt-2 list-disc pl-5">{p.rules.map((r, i) => <li key={i}>{r}</li>)}</ul>
           <p className="mt-2 break-all font-mono text-[11px] text-neutral-500">sha256 {p.hash}</p>
+          {p.status === "active" && (open === `revoke:${p.id}`
+            ? <SecureAction label="Revoke policy" busy={busy} onSubmit={(k, t) => revoke(p, k, t)} onCancel={() => setOpen(null)} />
+            : <button className="mt-2 rounded border border-red-600 px-3 py-1 text-xs text-red-600" onClick={() => setOpen(`revoke:${p.id}`)}>Revoke…</button>)}
           {p.status === "draft" && (open === p.id
             ? <SecureAction label="Confirm policy" busy={busy} onSubmit={(k, t) => confirm(p, k, t)} onCancel={() => setOpen(null)} />
             : <button className="mt-2 rounded border px-3 py-1 text-xs" onClick={() => setOpen(p.id)}>Review &amp; confirm…</button>)}

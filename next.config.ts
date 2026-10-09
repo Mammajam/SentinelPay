@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  output: "standalone", // minimal self-contained server for the container image
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {

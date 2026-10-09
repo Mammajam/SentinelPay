@@ -28,3 +28,18 @@ export function verifyAnchorSignature(a: Anchor, sig: string, key: string): bool
 export function mismatchedAnchors(anchors: Array<{ seq: number; hash: string }>, chainHashAt: (seq: number) => string | undefined): number[] {
   return anchors.filter((a) => chainHashAt(a.seq) !== a.hash).map((a) => a.seq);
 }
+
+/**
+ * Request to write one anchor as an IMMUTABLE-by-convention object in Google Cloud Storage
+ * (`ifGenerationMatch=0` => create-only, never overwrite). With a (locked) bucket retention
+ * policy even project owners cannot delete or replace it before the retention expires, which is
+ * what makes this an external anchor rather than just another row in the same database.
+ */
+export function buildGcsUpload(bucket: string, a: Anchor, hmacKey: string) {
+  const name = `anchors/${String(a.seq).padStart(12, "0")}-${a.hash.slice(0, 12)}.json`;
+  return {
+    name,
+    url: `https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(bucket)}/o?uploadType=media&ifGenerationMatch=0&name=${encodeURIComponent(name)}`,
+    body: JSON.stringify({ seq: a.seq, hash: a.hash, at: a.at, sig: signAnchor(a, hmacKey) }),
+  };
+}

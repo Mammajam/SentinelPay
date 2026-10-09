@@ -5,6 +5,7 @@ import { getCompiler } from "@/lib/agent/geap.ts";
 import { policyHash, readback } from "@/lib/policy/readback.ts";
 import { insertDraftPolicy } from "@/lib/db/store.ts";
 import { appendAudit } from "@/lib/db/audit.ts";
+import { log } from "@/lib/log.ts";
 
 // NOTE: no `ownerId` in the body. The tenant comes from the authenticated key, so an admin can
 // only ever create policies for their own tenant.
@@ -34,7 +35,9 @@ export async function POST(req: Request) {
     const id = await insertDraftPolicy({ ownerId: tenantId, sourceText: body.data.directive, compiled, hash, compiler: compiler.id });
     await appendAudit("policy.drafted", { id, tenantId, hash, keyId, compiler: compiler.id });
     return Response.json({ id, status: "draft", hash, readback: readback(compiled), compiled });
-  } catch {
+  } catch (e) {
+    // Log WHY (never the directive text, which may hold personal data) so failures are diagnosable.
+    log("ERROR", "policy.compile_failed", { tenantId, reason: e instanceof Error ? e.message.slice(0, 300) : "unknown" });
     return Response.json({ error: "compile_failed" }, { status: 502 });
   }
 }
