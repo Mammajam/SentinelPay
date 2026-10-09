@@ -18,3 +18,17 @@ export function redact(v: unknown, depth = 0): unknown {
 export function log(severity: "INFO" | "WARNING" | "ERROR", event: string, fields: Record<string, unknown> = {}) {
   process.stdout.write(`${JSON.stringify({ severity, message: event, event, time: new Date().toISOString(), ...(redact(fields) as object) })}\n`);
 }
+
+/** Per-stage timing for hot paths: lap("auth") records ms since the previous lap. */
+export function stopwatch() {
+  let last = performance.now();
+  const laps: Record<string, number> = {};
+  return {
+    laps,
+    lap(name: string) {
+      const now = performance.now();
+      laps[name] = Math.round(now - last);
+      last = now;
+    },
+  };
+}

@@ -1,5 +1,12 @@
 import { db } from "./client.ts";
 import { Policy } from "../policy/schema.ts";
+import { envMs, TtlCache } from "../cache.ts";
+
+// Advisory-path caches (validate-cart only). The webhook/capture path calls getPolicy()/merchantBelongsToTenant()
+// directly via the *Fresh* variants below so money movement never trusts a cached answer.
+const policyCache = new TtlCache<PolicyRow>(envMs("POLICY_CACHE_TTL_MS", 5_000));
+const merchantCache = new TtlCache<true>(envMs("MERCHANT_CACHE_TTL_MS", 30_000));
+export const invalidatePolicy = (id: string) => policyCache.deleteWhere((k) => k.endsWith(`:${id}`));
 
 export interface PolicyRow {
   id: string;
@@ -32,9 +39,13 @@ export async function getPolicy(id: string): Promise<PolicyRow | null> {
  * Tenant-scoped read for authenticated API callers. A policy owned by another tenant is
  * indistinguishable from a missing one (no existence oracle).
  */
-export async function getPolicyForTenant(id: string, tenantId: string): Promise<PolicyRow | null> {
+export async function getPolicyForTenant(id: string, tenantId: string, opts: { fresh?: boolean } = {}): Promise<PolicyRow | null> {
+  const ck = `${tenantId}:${id}`;
+  if (!opts.fresh) { const hit = policyCache.get(ck); if (hit) return hit; }
   const p = await getPolicy(id);
-  return p && p.ownerId === tenantId ? p : null;
+  if (!p || p.ownerId !== tenantId) return null;
+  if (p.status === "active") policyCache.set(ck, p); // never cache draft/revoked: activation and revocation must show at once
+  return p;
 }
 
 /** Activates only if the caller echoes the exact hash they were shown AND owns the policy. */
@@ -43,6 +54,7 @@ export async function activatePolicy(id: string, hash: string, by: string, tenan
     "UPDATE policies SET status='active', confirmed_by=$3, confirmed_at=now() WHERE id=$1 AND status='draft' AND compiled_hash=$2 AND owner_id=$4",
     [id, hash, by, tenantId],
   );
+  invalidatePolicy(id);
   return (rowCount ?? 0) === 1;
 }
 
@@ -52,6 +64,7 @@ export async function revokePolicy(id: string, tenantId: string): Promise<boolea
     "UPDATE policies SET status='revoked' WHERE id=$1 AND owner_id=$2 AND status IN ('draft','active')",
     [id, tenantId],
   );
+  invalidatePolicy(id); // this instance stops serving the cached copy at once; others within the TTL
   return (rowCount ?? 0) === 1;
 }
 
@@ -71,9 +84,12 @@ export async function registerMerchant(tenantId: string, merchantId: string) {
 }
 
 /** Fail-closed: an unregistered merchant belongs to nobody. */
-export async function merchantBelongsToTenant(merchantId: string, tenantId: string): Promise<boolean> {
+export async function merchantBelongsToTenant(merchantId: string, tenantId: string, opts: { fresh?: boolean } = {}): Promise<boolean> {
+  const ck = `${merchantId}\u0000${tenantId}`;
+  if (!opts.fresh && merchantCache.get(ck)) return true; // only positives are cached: a new registration works at once
   const { rows } = await db().query("SELECT 1 FROM tenant_merchants WHERE merchant_id=$1 AND tenant_id=$2", [merchantId, tenantId]);
-  return rows.length === 1;
+  if (rows.length === 1) { merchantCache.set(ck, true); return true; }
+  return false;
 }
 
 export async function tenantName(tenantId: string): Promise<string | null> {

@@ -2,6 +2,14 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { db } from "../db/client.ts";
 import { open, seal } from "../crypto/secretbox.ts";
 import { newTotpSecret, verifyTotp } from "./totp.ts";
+import { envMs, TtlCache } from "../cache.ts";
+
+/**
+ * Successful key lookups are cached briefly (default 10 s) to save a database round trip per request.
+ * Trade-off: a revoked key can keep working on an instance for up to the TTL. Requests that need MFA
+ * (policy confirm/revoke, re-trigger, login) NEVER use the cache: TOTP replay protection needs the DB.
+ */
+const authCache = new TtlCache<{ tenantId: string; keyId: string; role: Role }>(envMs("AUTH_CACHE_TTL_MS", 10_000));
 
 /**
  * Tenant-scoped, hashed, revocable, expiring API keys.
@@ -33,6 +41,7 @@ export async function createApiKey(a: { tenantId: string; role: Role; label?: st
 }
 
 export async function revokeApiKey(id: string, tenantId: string): Promise<boolean> {
+  authCache.deleteWhere(() => true); // this instance forgets immediately; others within the TTL
   const r = await db().query("UPDATE api_keys SET revoked_at = now() WHERE id=$1 AND tenant_id=$2 AND revoked_at IS NULL", [id, tenantId]);
   return (r.rowCount ?? 0) === 1;
 }
@@ -65,6 +74,11 @@ export async function authenticate(req: Request, role: Role, opts: { totp?: bool
 /** `totpCode` undefined => MFA not required for this call. */
 export async function authenticateToken(token: string | undefined, role: Role, totpCode?: string): Promise<AuthResult> {
   if (!token || !token.startsWith("sp_")) return { ok: false, status: 401, code: "invalid_key" };
+  const cacheKey = hashKey(token);
+  if (totpCode === undefined) {
+    const hit = authCache.get(cacheKey);
+    if (hit) return hit.role === role ? { ok: true, principal: hit } : { ok: false, status: 403, code: "wrong_role" };
+  }
   try {
     const { rows } = await db().query(
       `SELECT id, tenant_id AS "tenantId", role, totp_secret_enc AS "totpEnc", totp_last_step::text AS "lastStep"
@@ -85,6 +99,7 @@ export async function authenticateToken(token: string | undefined, role: Role, t
       if ((used.rowCount ?? 0) !== 1) return { ok: false, status: 401, code: "mfa_replayed" };
     }
 
+    if (totpCode === undefined) authCache.set(cacheKey, { tenantId: k.tenantId, keyId: k.id, role: k.role });
     db().query("UPDATE api_keys SET last_used_at = now() WHERE id=$1 AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute')", [k.id]).catch(() => {});
     return { ok: true, principal: { tenantId: k.tenantId, keyId: k.id, role: k.role } };
   } catch {

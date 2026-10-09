@@ -33,7 +33,7 @@ export async function POST(req: Request) {
   const { orderId, policyId } = body.data;
 
   try {
-    const policy = await getPolicyForTenant(policyId, tenantId);
+    const policy = await getPolicyForTenant(policyId, tenantId, { fresh: true });
     if (!policy || policy.status !== "active") return Response.json({ error: "not_found" }, { status: 404 });
 
     const failure = (await openCaptureFailures(tenantId, 200)).find((f) => f.orderId === orderId && f.policyId === policyId);
@@ -51,7 +51,7 @@ export async function POST(req: Request) {
     // Re-evaluate against the policy as it is now.
     const conv = orderToCart(order);
     if (conv.policyId !== policyId) return Response.json({ error: "order_policy_mismatch" }, { status: 409 });
-    if (!(await merchantBelongsToTenant(conv.cart.merchantId, tenantId))) {
+    if (!(await merchantBelongsToTenant(conv.cart.merchantId, tenantId, { fresh: true }))) {
       await appendAudit("order.retrigger_refused", { orderId, policyId, tenantId, keyId, reason: "merchant_not_registered" });
       return Response.json({ error: "merchant_not_registered" }, { status: 409 });
     }

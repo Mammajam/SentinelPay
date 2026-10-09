@@ -34,6 +34,10 @@ const childEnv = {
   PAYPAL_CLIENT_ID: "sim",
   PAYPAL_CLIENT_SECRET: "sim",
   RL_VALIDATE_PER_MIN: "30",
+  // real caches, short TTLs: exercised for real, and revocation must propagate within the TTL
+  AUTH_CACHE_TTL_MS: "1000",
+  POLICY_CACHE_TTL_MS: "1000",
+  MERCHANT_CACHE_TTL_MS: "1000",
 };
 Object.assign(process.env, { PAYPAL_BASE_URL: SIM, PAYPAL_CLIENT_ID: "sim", PAYPAL_CLIENT_SECRET: "sim" });
 
@@ -301,7 +305,8 @@ async function run() {
   const tmp = await createApiKey({ tenantId: TA, role: "agent", label: "to-revoke" });
   check("fresh key works", (await api("/api/validate-cart", tmp.key, { policyId: p1, cart })).status === 200);
   check("revoke succeeds", await revokeApiKey(tmp.id, TA));
-  check("revoked key => 401", (await api("/api/validate-cart", tmp.key, { policyId: p1, cart })).status === 401);
+  await new Promise((r) => setTimeout(r, 1300)); // the app's auth cache (1 s here, 10 s default) must age out
+  check("revoked key => 401 once the auth cache TTL has passed", (await api("/api/validate-cart", tmp.key, { policyId: p1, cart })).status === 401);
   check("revoking via the wrong tenant is refused", !(await revokeApiKey(agentA.id, TB)));
   const expired = await createApiKey({ tenantId: TA, role: "agent", label: "expired", expiresAt: new Date(Date.now() - 60_000) });
   check("expired key => 401", (await api("/api/validate-cart", expired.key, { policyId: p1, cart })).status === 401);
@@ -457,6 +462,17 @@ async function run() {
   check("/api/health => 200 ok", hl.status === 200 && ((await hl.json()) as { ok: boolean }).ok === true);
   const rd = await fetch(`${APP}/api/ready`);
   check("/api/ready => 200 (database reachable)", rd.status === 200 && ((await rd.json()) as { ready: boolean }).ready === true);
+
+  section("S29 Concurrency on the advisory path: 40 parallel validations, audit append without a global lock");
+  const pConc = await makePolicy(TA, HAPPY);
+  const beforeAudit = Number((await db().query("select count(*)::int n from audit_log where kind='cart.validated' and payload->>'policyId'=$1", [pConc])).rows[0].n);
+  const concKey = await createApiKey({ tenantId: TA, role: "agent", label: "conc" });
+  const concRes = await Promise.all(Array.from({ length: 25 }, (_, i) => api("/api/validate-cart", concKey.key, { policyId: pConc, cart: cartFor(MA, `c-conc-${i}`) })));
+  check("all 25 concurrent validations succeed", concRes.every((r) => r.status === 200), concRes.map((r) => r.status));
+  const afterAudit = Number((await db().query("select count(*)::int n from audit_log where kind='cart.validated' and payload->>'policyId'=$1", [pConc])).rows[0].n);
+  check("exactly 25 audit entries were written (none lost, none duplicated)", afterAudit - beforeAudit === 25, afterAudit - beforeAudit);
+  const seqs = (await db().query("select seq::int s from audit_log order by seq")).rows.map((r: { s: number }) => r.s);
+  check("audit sequence is gap-free and strictly increasing", seqs.every((v: number, i: number) => v === i + 1));
 
   section("S15 Audit chain integrity after everything above (incl. concurrent writes)");
   check("hash chain verifies end-to-end", (await verifyStoredChain()) === null, await verifyStoredChain());

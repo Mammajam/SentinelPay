@@ -73,7 +73,7 @@ export async function POST(req: Request) {
         const conv = orderToCart(order);
         policyId = conv.policyId;
         const policy = await getPolicy(conv.policyId);
-        if (policy?.status === "active" && !(await merchantBelongsToTenant(conv.cart.merchantId, policy.ownerId))) {
+        if (policy?.status === "active" && !(await merchantBelongsToTenant(conv.cart.merchantId, policy.ownerId, { fresh: true }))) {
           // Cross-tenant guard: the order's merchant must belong to the policy's tenant, otherwise
           // one tenant could apply (or burn the cumulative budget of) another tenant's policy.
           detail = "merchant_not_registered_for_policy_tenant";

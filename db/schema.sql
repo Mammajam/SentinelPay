@@ -127,3 +127,7 @@ CREATE OR REPLACE FUNCTION anchors_append_only() RETURNS trigger AS $$
 BEGIN RAISE EXCEPTION 'audit_anchors is append-only'; END $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS anchors_no_mutate ON audit_anchors;
 CREATE TRIGGER anchors_no_mutate BEFORE UPDATE OR DELETE ON audit_anchors FOR EACH ROW EXECUTE FUNCTION anchors_append_only();
+
+-- Phase 6a: the audit chain's linearity is enforced by the database, not by an application lock.
+-- Two rows can never share a predecessor, so concurrent writers cannot fork the chain.
+CREATE UNIQUE INDEX IF NOT EXISTS audit_prev_hash_uq ON audit_log (prev_hash);

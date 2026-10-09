@@ -10,6 +10,7 @@ import { redact } from "../src/lib/log.ts";
 import { z } from "zod";
 import { Policy } from "../src/lib/policy/schema.ts";
 import { toModelSchema } from "../src/lib/agent/schema.ts";
+import { envMs, TtlCache } from "../src/lib/cache.ts";
 import { buildOpenApi } from "../src/lib/agent/openapi.ts";
 import { executeTool, runAssistant, TOOL_DECLARATIONS, type AssistantModel, type ToolBackend } from "../src/lib/agent/assistant.ts";
 
@@ -206,4 +207,28 @@ test("loosening the model schema does not loosen validation: Policy still reject
   assert.equal(Policy.safeParse({ version: 1, currency: "USD", rules: [] }).success, false, "min rule count still enforced");
   assert.equal(Policy.safeParse({ version: 1, currency: "USD", rules: Array.from({ length: 51 }, () => ({ kind: "max_total", amount: 1 })) }).success, false, "max rule count still enforced");
   assert.equal(Policy.safeParse({ version: 1, currency: "USD", rules: [{ kind: "max_total", amount: 12.5 }] }).success, false, "integer cents still enforced");
+});
+
+test("TTL cache: hit, expiry, bound, delete, and ttl=0 disables it", async () => {
+  let ttl = 40;
+  const c = new TtlCache<number>(() => ttl, 3);
+  c.set("a", 1);
+  assert.equal(c.get("a"), 1);
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(c.get("a"), undefined, "expired");
+  c.set("a", 1); c.set("b", 2); c.set("c", 3); c.set("d", 4);
+  assert.equal(c.get("a"), undefined, "oldest evicted at the size bound");
+  assert.equal(c.get("d"), 4);
+  c.deleteWhere((k) => k === "d");
+  assert.equal(c.get("d"), undefined);
+  ttl = 0;
+  c.set("z", 9);
+  assert.equal(c.get("z"), undefined, "ttl 0 => nothing is ever cached");
+});
+test("envMs: valid numbers (incl. 0) are honoured, junk and unset fall back", () => {
+  process.env.X_TTL = "250"; assert.equal(envMs("X_TTL", 7)(), 250);
+  process.env.X_TTL = "0"; assert.equal(envMs("X_TTL", 7)(), 0);
+  process.env.X_TTL = "abc"; assert.equal(envMs("X_TTL", 7)(), 7);
+  process.env.X_TTL = "-5"; assert.equal(envMs("X_TTL", 7)(), 7);
+  delete process.env.X_TTL; assert.equal(envMs("X_TTL", 7)(), 7);
 });
