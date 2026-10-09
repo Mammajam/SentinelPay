@@ -83,3 +83,21 @@ The six recommendations from the concept assessment were actioned. A working, te
 - **Found by visual check and fixed**: Next prerender error (`new Date()` before request time), unreadable red rows in dark mode, misleading empty state while loading, scaffold tab title.
 - **Found by test**: a flaky replay test (TOTP window rollover) — fixed by reusing the identical code.
 - **All open work**: see `docs/REMINDERS.md`.
+
+---
+## Update 2026-10-09 — Phase 6a: deployed to Cloud Run, load-tested, optimised
+- **Deployed** (`deploy/cloudrun.sh`, `deploy/README.md`): Cloud Run `sentinelpay` in `us-east5` (next to Neon `us-east-2`), secrets in Secret Manager, create-only GCS anchor bucket (30-day retention, **not yet locked**), hourly Cloud Scheduler anchor job, Vertex AI via service account (no API key). Verified live: health/ready, Agent Studio OpenAPI, auth, anchors written to GCS and verified, scheduler enabled.
+- **Gemini via Vertex works** (the AI Studio 402 no longer matters). A live bug was found and fixed: Vertex rejects the full Zod JSON Schema ("too many states"); a sanitised schema is sent while strict Zod validation remains the real check (`src/lib/agent/schema.ts`). Live results: laptop directive correct; prompt-injection directive produced a harmless `max_total = $0`; **a "never more than 2 units" limit was silently dropped** by the model (the human readback/confirm step is what catches this; see REMINDERS).
+- **Kill-switch**: `POST /api/policies/revoke` (admin + MFA), dashboard button, e2e-tested (validation 403 and capture denied immediately).
+- **Operations**: structured JSON logs (redacted), `/api/health` + `/api/ready`, per-stage timing in `cart.validated` logs, CLI `add-merchant|list-keys|rotate`, webhook cert-cache TTL.
+
+### Load test, `POST /api/validate-cart`, Cloud Run vs Neon (server-side p95 target < 150 ms)
+| | Before | After (rev 00010) |
+|---|---|---|
+| Round trips per request | ~10 (auth, rate, policy, merchant, record, audit x5) | 3 (rate, record, group-committed audit) |
+| Server-side p50 / p95 / p99 | ~240 / ~325 / n/a serial; ~500 / ~554 under c=10 | **89 / 137 / 196 ms** (980 requests, c=1/10/25) |
+| Throughput ceiling | ~14 req/s (global advisory lock held ~72 ms) | 76 req/s at c=25 and still scaling |
+| Target p95 < 150 ms | NOT MET | **MET (server-side)** |
+Findings: one DB round trip costs ~24 ms (Cloud Run to Neon). The old global lock capped the system; fixes = lock-free **group-commit** audit append (DB-enforced linearity: PK `seq` + UNIQUE `prev_hash`, retry on conflict), and short TTL caches for key auth (10 s), active policies (5 s) and positive merchant bindings (30 s) **on the advisory path only**. Webhook, capture and re-trigger always read fresh; MFA calls never use the auth cache.
+**Caveats**: client-side p50 from the owner's location is ~280 ms (network dominates; `/api/health` alone is ~425 ms with a fresh TLS handshake there). Cold starts (min-instances 0) produced a ~4.3 s outlier: set `MIN_INSTANCES=1` for production. Numbers are one policy, one region, warm instances; re-measure with real traffic shape.
+- **Verified**: unit 46/46; e2e **134/134** twice (incl. 25-way concurrent audit, cache TTL propagation); CI green.

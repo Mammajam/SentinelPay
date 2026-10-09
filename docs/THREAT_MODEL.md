@@ -45,6 +45,9 @@ Decision values: `ALLOW | REQUIRE_REAUTH | DENY`. `ALLOW` is returned only when 
 
 | T22 | Abuse of the capture re-trigger (moving money) | Admin Bearer key + single-use TOTP (cookie rejected); order must be in the caller tenant's open-failure queue; PayPal asked for CURRENT order state (only APPROVED proceeds); policy + merchant binding re-evaluated now; same request id reused after an ambiguous failure; attempts counted in the audit log; per-tenant rate limit | M |
 
+| T23 | Stale cache after revocation on the advisory path | validate-cart caches key auth (10 s), active policies (5 s), positive merchant bindings (30 s) per instance; the revoking instance clears at once, others within the TTL. **Money path (webhook inspection, capture, re-trigger) always reads fresh**, so a revoked policy/key cannot authorize a capture. MFA calls never use the auth cache | M (bounded window, documented) |
+| T24 | Public Cloud Run ingress (needed for PayPal webhooks and Agent Studio) | App-level auth on every route, per-key/IP/tenant rate limits (fail closed), signed webhooks, no secrets in images. Residual: no WAF/Cloud Armor, no custom domain | P |
+
 ## Open items
 - **O1** Enforce SentinelPay as the *only* capture path (PayPal-side credential scoping / merchant config).
 - **O4** External anchoring of audit chain head (e.g., periodic hash to object-lock storage).

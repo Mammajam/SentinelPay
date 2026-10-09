@@ -34,7 +34,7 @@ _Last updated 2026-10-07 (after Phase 5). Tick items off here as they close. "Yo
 - [x] ~~Deploy to Cloud Run + Secret Manager~~ (2026-10-09, `deploy/cloudrun.sh`, see `deploy/README.md`). Remaining: custom domain / Cloud Armor, and move from one shared Neon DB to a separate prod DB.
 - [x] ~~External anchor sink + hourly scheduler~~ (GCS bucket + Cloud Scheduler). **Still YOU: lock the bucket retention** (irreversible; see `deploy/README.md`) so anchors become tamper-proof.
 - [ ] **External IdP/SSO** for operators (OIDC) on top of keys+TOTP.
-- [x] ~~Structured JSON logs~~ (done). [ ] Log-based **alerts** (see `deploy/README.md`) and SLO dashboard. [ ] **Load test** results vs p95 < 150 ms: `npm run loadtest` exists; see STATUS_REPORT for the numbers.
+- [x] ~~Structured JSON logs~~ (done). [ ] Log-based **alerts** (see `deploy/README.md`) and SLO dashboard. [x] ~~Load test~~ server-side p95 **137 ms (met)**, see STATUS_REPORT. [ ] Decide `MIN_INSTANCES=1` (cold start ~4 s outlier; small idle cost).
 - [ ] **CI e2e** against an ephemeral Neon branch (currently CI runs unit tests only; e2e needs DB secrets).
 - [ ] Branch protection: optionally require PR review; keep CI required.
 - [ ] **Production cut-over checklist**: C1–C4 answered, pen test, legal review, O1 enforced (SentinelPay is the only capture path), `PAYPAL_ALLOW_LIVE=1` deliberately.
@@ -43,6 +43,13 @@ _Last updated 2026-10-07 (after Phase 5). Tick items off here as they close. "Yo
 - [ ] Optional **MCP server** transport for Gemini Enterprise (needs OAuth 2.0 + admin toggle).
 - [ ] Optional AG Grid Community swap-in for the tables.
 - [ ] Silence the `MODULE_TYPELESS_PACKAGE_JSON` Node warning (`"type": "module"` needs a compatibility check with Next config files).
+
+- [ ] **Compiler completeness**: the live Vertex compile dropped a stated limit ("never more than 2 units"). Add few-shot examples and/or have the model return `unmapped_constraints` that the readback shows as a warning ("these parts of your request were NOT turned into rules"). Human confirmation catches it today; make it harder to miss.
+- [ ] **Lock the anchor bucket retention** (YOU; irreversible; `deploy/README.md`) and add log-based alerts (webhook.rejected, rate_limited, admin.login_failed spikes, capture_failed, severity>=ERROR).
+- [ ] Separate **prod Neon database/branch** from the dev/e2e one (the deployed service currently shares the dev DB with its test rows).
+- [ ] Custom domain + Cloud Armor in front of the public service (T24).
+- [ ] Further latency headroom if needed: merge the rate-limit and validation-record writes into one round trip (now 3).
+- [ ] Throwaway test tenants (`e2e-*`, `lt-*`, `vx-*`, `uicheck-*`) remain in the dev DB by design (append-only audit).
 
 ## C. Known limits (not tasks, but don't forget)
 - Simulator ≠ PayPal: success proves our logic against *my reading* of the docs, not PayPal's real contract (O5).

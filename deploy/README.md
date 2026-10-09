@@ -39,3 +39,9 @@ Logs are JSON (`severity`, `event`, …): `gcloud run services logs read sentine
 - `NODE_ENV=production` in the image disables the PayPal simulator's certificate allowance by design; a hosted copy cannot use the simulator.
 - Gemini runs through Vertex AI using the service account (no API key on Cloud Run), billed to the GCP project, not AI Studio credits.
 - Operator CLI (`npm run admin -- …`) runs from your laptop against the same Neon database, so keys created there work on Cloud Run.
+
+## Performance notes (measured 2026-10-09, `npm run loadtest -- <url> 300 10`)
+Server-side validate-cart p50/p95/p99 = 89/137/196 ms; ~76 req/s at 25 concurrent. Per-stage timings are in each `cart.validated` log line (`stagesMs`). To read them:
+`gcloud logging read 'resource.type="cloud_run_revision" AND jsonPayload.event="cart.validated"' --freshness=15m --limit=500 --format=json`.
+Cold starts (min-instances 0) cost ~4 s on the first request; use `MIN_INSTANCES=1 deploy/cloudrun.sh` for production.
+Cache TTLs (env, ms; 0 disables): `AUTH_CACHE_TTL_MS` 10000, `POLICY_CACHE_TTL_MS` 5000, `MERCHANT_CACHE_TTL_MS` 30000. They apply to validate-cart only.
