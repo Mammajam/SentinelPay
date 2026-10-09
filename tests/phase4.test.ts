@@ -11,6 +11,8 @@ import { z } from "zod";
 import { Policy } from "../src/lib/policy/schema.ts";
 import { toModelSchema } from "../src/lib/agent/schema.ts";
 import { envMs, TtlCache } from "../src/lib/cache.ts";
+import { buildBatchInsert } from "../src/lib/db/audit.ts";
+import { makeEntry as chainEntry, verifyChain } from "../src/lib/audit/chain.ts";
 import { buildOpenApi } from "../src/lib/agent/openapi.ts";
 import { executeTool, runAssistant, TOOL_DECLARATIONS, type AssistantModel, type ToolBackend } from "../src/lib/agent/assistant.ts";
 
@@ -231,4 +233,17 @@ test("envMs: valid numbers (incl. 0) are honoured, junk and unset fall back", ()
   process.env.X_TTL = "abc"; assert.equal(envMs("X_TTL", 7)(), 7);
   process.env.X_TTL = "-5"; assert.equal(envMs("X_TTL", 7)(), 7);
   delete process.env.X_TTL; assert.equal(envMs("X_TTL", 7)(), 7);
+});
+
+test("group commit: a batch is chained in memory, valid, and written as ONE statement with correct parameter order", () => {
+  let prev = null as ReturnType<typeof chainEntry> | null;
+  const entries = ["a", "b", "c"].map((k, i) => (prev = chainEntry(prev, k, { n: i, gone: undefined })));
+  assert.equal(verifyChain(entries.map((e) => ({ ...e, payload: JSON.parse(JSON.stringify(e.payload)) }))), null, "batch forms an intact chain");
+  assert.deepEqual(entries.map((e) => e.seq), [1, 2, 3]);
+  const { text, params } = buildBatchInsert(entries);
+  assert.equal((text.match(/\(\$\d+,/g) ?? []).length, 3, "three rows in one INSERT");
+  assert.match(text, /\$18\)$/, "last placeholder is $18 (3 rows x 6 columns)");
+  assert.equal(params.length, 18);
+  assert.deepEqual(params.slice(0, 6), [1, entries[0].prevHash, entries[0].hash, "a", JSON.stringify(entries[0].payload), entries[0].at]);
+  assert.equal(params[6 + 1], entries[0].hash, "row 2 links to row 1's hash");
 });

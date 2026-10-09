@@ -87,7 +87,7 @@ say "Building and deploying (Cloud Build -> Cloud Run)"
 run gcloud run deploy "$SERVICE" --source . --region "$REGION" \
   --allow-unauthenticated \
   --service-account "$SA" \
-  --min-instances 0 --max-instances 5 --memory 512Mi --cpu 1 --concurrency 40 --timeout 30 \
+  --min-instances "${MIN_INSTANCES:-0}" --max-instances 5 --memory 512Mi --cpu 1 --concurrency 40 --timeout 30 \
   --set-env-vars "PAYPAL_BASE_URL=https://api-m.sandbox.paypal.com,GEAP_PROJECT=$PROJECT,GEAP_LOCATION=us-central1,GEAP_MODEL=gemini-2.5-flash,ANCHOR_GCS_BUCKET=$BUCKET" \
   --set-secrets "$SET_SECRETS"
 
