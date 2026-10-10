@@ -2,6 +2,14 @@
 
 _Last updated 2026-10-07 (after Phase 5). Tick items off here as they close. "You" = the project owner; "Me" = the coding assistant._
 
+## 0. HACKATHON: PayPal AI Hackathon 2026 (Devpost) — closes **2026-11-12** (time zone unverified)
+See `docs/DEVPOST_DRAFT.md` for the readiness table, video outline and draft text. Stated rule: project "must meaningfully use both PayPal and AI".
+- [ ] **Read the Devpost Rules/Overview** (https://paypalaihackathon.devpost.com/): required fields, video length, repo/open-source rule, testing instructions, eligibility, deadline time zone, sponsor-prize rules.
+- [ ] **REAL PayPal sandbox integration (top gap).** All PayPal behaviour so far was tested against my local simulator. Ask the hackathon organisers / PayPal developer support how to obtain sandbox credentials from Liberia, or borrow a teammate's sandbox app. Then run the flow + `e2e:sim` runner against the real sandbox and record it.
+- [ ] Demo video (host publicly), screenshots, architecture diagram, judge access (throwaway demo tenant; never real secrets).
+- [ ] Optional prize levers: AG Grid sponsor prize (check rules; swap tables to AG Grid Community), compiler-completeness fix.
+- [ ] Submit at least 48 h before the deadline.
+
 ## A. Needs YOU (blocking or time-sensitive)
 - [x] ~~Re-rotate the Neon password~~ (confirmed by owner 2026-10-09; deployed secrets were created from the rotated value).
 - [ ] **Fund Gemini** (AI Studio credits, or set up Vertex with a real GCP *project ID* in `GEAP_PROJECT`). Until then the policy compiler and operator assistant are untested live (HTTP 402/502). Then I re-run the compiler tests incl. prompt-injection red-teaming.
