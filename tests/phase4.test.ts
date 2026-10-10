@@ -247,3 +247,27 @@ test("group commit: a batch is chained in memory, valid, and written as ONE stat
   assert.deepEqual(params.slice(0, 6), [1, entries[0].prevHash, entries[0].hash, "a", JSON.stringify(entries[0].payload), entries[0].at]);
   assert.equal(params[6 + 1], entries[0].hash, "row 2 links to row 1's hash");
 });
+
+test("dry_run_cart: the CODE builds the cart (field names + total); the model only fills named parameters", async () => {
+  const seen: Array<{ id: string; cart: Record<string, unknown> }> = [];
+  const b: ToolBackend = { ...backend(), async dryRunCart(id, cart) { seen.push({ id, cart: cart as Record<string, unknown> }); return { decision: "ALLOW", violations: [] }; } };
+  await executeTool("dry_run_cart", {
+    policy_id: UUID, merchant_id: "M-1", lines: [{ sku: "LAP1", quantity: 2, unit_price_cents: 65000 }], tax_cents: 8000, shipping_cents: 2000,
+    tenant_id: "victim", total: 1, // a model-supplied total / tenant are ignored
+  }, b);
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].cart, { cartId: "dry-run", merchantId: "M-1", currency: "USD", lines: [{ sku: "LAP1", quantity: 2, unitPrice: 65000 }], tax: 8000, shipping: 2000, total: 140000 });
+});
+test("dry_run_cart: floats, negatives, missing merchant, or the old free-form cart shape never reach the backend", async () => {
+  const log: string[] = [];
+  const b = backend(log);
+  const bad = [
+    { policy_id: UUID, merchant_id: "M", lines: [{ sku: "A", quantity: 1, unit_price_cents: 12.5 }] },
+    { policy_id: UUID, merchant_id: "M", lines: [{ sku: "A", quantity: 1, unit_price_cents: -1 }] },
+    { policy_id: UUID, lines: [{ sku: "A", quantity: 1, unit_price_cents: 100 }] },
+    { policy_id: UUID, merchant_id: "M", lines: [] },
+    { policy_id: UUID, cart: { merchantId: "M" } },
+  ];
+  for (const args of bad) assert.deepEqual(await executeTool("dry_run_cart", args, b), { error: "invalid_arguments_or_tool_failure" });
+  assert.deepEqual(log, []);
+});
