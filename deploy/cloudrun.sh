@@ -25,7 +25,7 @@ say() { printf '\n==> %s\n' "$*"; }
 val() { sed -n "s/^$1=//p" "$ENV_FILE" | head -1; }   # raw value of KEY from the env file
 
 [ -f "$ENV_FILE" ] || { echo "missing $ENV_FILE" >&2; exit 1; }
-for k in DATABASE_URL SENTINEL_MASTER_KEY SESSION_SECRET CRON_SECRET ANCHOR_HMAC_KEY; do
+for k in DATABASE_URL SENTINEL_MASTER_KEY SESSION_SECRET CRON_SECRET ANCHOR_HMAC_KEY ANTHROPIC_API_KEY; do
   [ -n "$(val $k)" ] || { echo "$k is empty in $ENV_FILE" >&2; exit 1; }
 done
 case "$(val DATABASE_URL)" in postgresql://*) ;; *) echo "DATABASE_URL must start with exactly one postgresql://" >&2; exit 1;; esac
