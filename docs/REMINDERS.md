@@ -55,6 +55,7 @@ See `docs/DEVPOST_DRAFT.md` for the readiness table, video outline and draft tex
 
 - [x] ~~Compiler completeness~~ resolved and verified live on 2026-10-20 (prompt now requires every stated limit to become a rule). Optional hardening: have the model also return `unmapped_constraints` and show them as a warning in the readback.
 - [ ] **Lock the anchor bucket retention** (YOU; irreversible; `deploy/README.md`) and add log-based alerts (webhook.rejected, rate_limited, admin.login_failed spikes, capture_failed, severity>=ERROR).
+- [ ] Dashboard "Anchors … (db)" label shows the sink of the *latest* anchor; local `e2e:sim` runs write `db` anchors (no GCS bucket locally) into the SAME shared database, so it can show `db` even though the hourly cron writes `gcs` (2026-10-20: 278 gcs vs 14 db). Root cause = shared dev/prod DB (next item); optionally show a per-sink breakdown.
 - [ ] Separate **prod Neon database/branch** from the dev/e2e one (the deployed service currently shares the dev DB with its test rows).
 - [ ] Custom domain + Cloud Armor in front of the public service (T24).
 - [ ] Further latency headroom if needed: merge the rate-limit and validation-record writes into one round trip (now 3).
