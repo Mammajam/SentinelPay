@@ -12,7 +12,7 @@ See `docs/DEVPOST_DRAFT.md` for the readiness table, video outline and draft tex
 
 ## A. Needs YOU (blocking or time-sensitive)
 - [x] ~~Re-rotate the Neon password~~ (confirmed by owner 2026-10-09; deployed secrets were created from the rotated value).
-- [ ] **Set `ANTHROPIC_API_KEY`** in `.env.local` and Secret Manager (`sentinelpay-anthropic-api-key`), then redeploy. The Claude swap (2026-10-20) is tested only with mocks; the compiler and assistant are untested live. Then re-run compiler tests incl. prompt-injection red-teaming and the "never more than 2 units" case.
+- [ ] **Set `ANTHROPIC_API_KEY`** in `.env.local` and Secret Manager (`sentinelpay-anthropic-api-key`), then redeploy. Claude swap (2026-10-20, `claude-sonnet-5-5`): verified live locally (compiler kept the 2-unit limit, neutralised an injection directive to max_total 0; assistant used tools and refused to activate/capture). Cloud Run not yet redeployed. Then re-run compiler tests incl. prompt-injection red-teaming and the "never more than 2 units" case.
 - [ ] **Create your first admin key** and add the TOTP secret to an authenticator app: `npm run admin -- key --tenant mytenant --role admin --label "my laptop"` (run it yourself; it prints secrets once). Then sign in at the dashboard.
 - [ ] **Register your real PayPal merchant id** (tenant `mytenant` currently has the placeholder `YOUR_MERCHANT_ID`).
 - [ ] **Send the PayPal inquiry** in `docs/O2_PAYPAL_INQUIRY.md` (token-path question, pre-capture hook, capture-only credentials, webhook verification, Seller Protection, Store Sync). Record the answer in `docs/SPEC_ADDENDUM.md` (closes O2).
