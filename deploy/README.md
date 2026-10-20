@@ -37,7 +37,7 @@ Logs are JSON (`severity`, `event`, …): `gcloud run services logs read sentine
 
 ## Notes
 - `NODE_ENV=production` in the image disables the PayPal simulator's certificate allowance by design; a hosted copy cannot use the simulator.
-- The policy compiler and operator assistant call the Anthropic API with `ANTHROPIC_API_KEY` (read from `.env.local`, stored in Secret Manager as `sentinelpay-anthropic-api-key`). Optional `ANTHROPIC_MODEL` overrides the default `claude-opus-5-5`.
+- The policy compiler and operator assistant call the Anthropic API with `ANTHROPIC_API_KEY` (read from `.env.local`, stored in Secret Manager as `sentinelpay-anthropic-api-key`). Optional `ANTHROPIC_MODEL` overrides the default `claude-haiku-5-5`.
 - Operator CLI (`npm run admin -- …`) runs from your laptop against the same Neon database, so keys created there work on Cloud Run.
 
 ## Performance notes (measured 2026-10-09, `npm run loadtest -- <url> 300 10`)
