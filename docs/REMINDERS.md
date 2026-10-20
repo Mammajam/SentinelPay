@@ -70,3 +70,13 @@ See `docs/DEVPOST_DRAFT.md` for the readiness table, video outline and draft tex
 - Audit anchoring without an external sink does not stop a DB superuser.
 - Git history: the Phase 4 work landed in one commit labelled "feat(agent)…" (a failed `git add` skipped the first commit). Content is correct; label is imprecise.
 - `e2e:sim` writes permanent test rows to the dev database (audit log is append-only by design).
+
+## D. Devpost official rules (read 2026-10-20) and what they mean for us
+- **Deadline:** submissions close **Thu 2026-11-12, 12:00 pm Pacific**. Judging 12-01 to 12-15; winners about 12-21.
+- **Must** integrate the PayPal developer platform using the **free sandbox** plus an AI tool. A simulator-only build is a risk for Stage One (pass/fail "reasonably applies the required APIs"). Closing O5 against the real sandbox is the top priority.
+- **Sandbox access per the rules:** existing PayPal account or a free one at developer.paypal.com. Liberia is not on the excluded-country list, but sandbox sign-up may still be blocked (see user-constraints memory); fallback is a collaborator's sandbox REST app (client id/secret) or asking support@devpost.com / the Devpost Q&A.
+- **Submission needs:** text description, working demo (hosted URL or run instructions with test credentials), public repo with detectable open-source license (Apache-2.0 present), YouTube video < 3 min, public, no third-party trademarks/copyrighted music.
+- **Project history:** must explain how a pre-existing project was significantly updated during the period (ours started in the period; state the dates).
+- **Sponsor prizes:** "Best Use of APIMatic" ($1,000 + 6 months Business, 3 winners) and "Best Use of AG Grid" (5 prizes) require only that the submission **uses any tools from that sponsor**; no extra technical conditions are stated. Say explicitly in the text which tools were used and how (AG Grid Community on six tabs; APIMatic Context Plugin content as a dev reference, see `docs/APIMATIC_VERIFICATION.md`). One Sponsor Prize plus one Grand/Honorable prize per project.
+- [ ] **APIMatic plugin install:** the `claude` CLI is not on the PATH of the user's shell, so `npx context-plugins install paypal` cannot run (it shells out to `claude plugin ...`). Options: install the Claude Code CLI first, or copy the plugin's skills into `.claude/skills/` from the pinned commit. Until then say "used as reference content", not "installed".
+- [ ] Demo video: script in `docs/DEMO_VIDEO_SCRIPT.md`; record after the sandbox run.
