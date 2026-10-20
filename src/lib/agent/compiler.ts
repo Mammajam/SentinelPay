@@ -22,7 +22,7 @@ export interface PolicyCompiler {
   compile(directive: string, defaults: { currency: string }): Promise<Policy>;
 }
 
-export const DEFAULT_MODEL = "claude-haiku-5-5";
+export const DEFAULT_MODEL = "claude-sonnet-5-5";
 
 const SYSTEM = `You convert a shopper's spending directive into a JSON policy.
 Rules:
