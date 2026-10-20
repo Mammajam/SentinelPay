@@ -18,7 +18,7 @@ interface OrderResource {
   purchase_units?: Array<{
     custom_id?: string;
     payee?: { merchant_id?: string };
-    amount?: { currency_code: string; value: string; breakdown?: { item_total?: MoneyV2; tax_total?: MoneyV2; shipping?: MoneyV2 } };
+    amount?: { currency_code: string; value: string; breakdown?: { item_total?: MoneyV2; tax_total?: MoneyV2; shipping?: MoneyV2; handling?: MoneyV2; insurance?: MoneyV2; shipping_discount?: MoneyV2; discount?: MoneyV2 } };
     items?: Array<{ sku?: string; name: string; quantity: string; unit_amount: MoneyV2 }>;
   }>;
 }
@@ -34,7 +34,11 @@ export function orderToCart(o: OrderResource): { policyId: string; cart: Omit<Ca
   const pu = o.purchase_units?.[0];
   if (!pu?.custom_id || !pu.amount?.breakdown || !pu.items?.length || !pu.payee?.merchant_id) throw new Error("order missing required fields");
   const cur = pu.amount.currency_code;
-  const m = (x?: MoneyV2) => (x ? toMinor(x.value, x.currency_code) : 0);
+  const m = (x?: MoneyV2) => {
+    if (!x) return 0;
+    if (x.currency_code !== cur) throw new Error("mixed currencies in breakdown"); // fail closed: cannot reconcile
+    return toMinor(x.value, x.currency_code);
+  };
   return {
     policyId: pu.custom_id,
     cart: {
@@ -47,6 +51,10 @@ export function orderToCart(o: OrderResource): { policyId: string; cart: Omit<Ca
       }),
       tax: m(pu.amount.breakdown.tax_total),
       shipping: m(pu.amount.breakdown.shipping),
+      handling: m(pu.amount.breakdown.handling),
+      insurance: m(pu.amount.breakdown.insurance),
+      shippingDiscount: m(pu.amount.breakdown.shipping_discount),
+      discount: m(pu.amount.breakdown.discount),
       total: toMinor(pu.amount.value, cur),
     },
   };

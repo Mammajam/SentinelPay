@@ -115,9 +115,11 @@ const server = http.createServer(async (req, res) => {
 
       const itemsSum = pu.items.reduce((s, i) => s + cents(i.unit_amount.value) * Number(i.quantity), 0);
       const br = pu.amount.breakdown;
-      const total = cents(br.item_total.value) + cents(br.tax_total?.value ?? "0.00") + cents(br.shipping?.value ?? "0.00");
+      const c = (m) => cents(m?.value ?? "0.00");
+      // PayPal Orders v2: amount = item_total + tax_total + shipping + handling + insurance - shipping_discount - discount
+      const total = c(br.item_total) + c(br.tax_total) + c(br.shipping) + c(br.handling) + c(br.insurance) - c(br.shipping_discount) - c(br.discount);
       if (itemsSum !== cents(br.item_total.value) || total !== cents(pu.amount.value)) {
-        return send(res, 422, unprocessable("AMOUNT_MISMATCH", "Should equal item_total + tax_total + shipping"));
+        return send(res, 422, unprocessable("AMOUNT_MISMATCH", "Should equal item_total + tax_total + shipping + handling + insurance - shipping_discount - discount"));
       }
       if (pu.invoice_id && invoices.has(pu.invoice_id)) {
         const r = unprocessable("DUPLICATE_INVOICE_ID", "Duplicate Invoice ID detected.");
@@ -154,10 +156,22 @@ const server = http.createServer(async (req, res) => {
       if (o.captureFault === "PROCESSOR_UNAVAILABLE") return send(res, 503, { name: "SERVICE_UNAVAILABLE", message: "Service Unavailable" });
 
       const pu = o.purchase_units[0];
-      const capture = { id: `CAP-${randomUUID().slice(0, 12).toUpperCase()}`, status: "COMPLETED", amount: pu.amount && { currency_code: pu.amount.currency_code, value: pu.amount.value }, custom_id: pu.custom_id, invoice_id: pu.invoice_id, final_capture: true };
+      const capture = {
+        id: `CAP-${randomUUID().slice(0, 12).toUpperCase()}`, status: "COMPLETED",
+        amount: pu.amount && { currency_code: pu.amount.currency_code, value: pu.amount.value },
+        custom_id: pu.custom_id, invoice_id: pu.invoice_id, final_capture: true,
+        // Real capture resources carry the related order id (supplementary_data.related_ids.order_id).
+        supplementary_data: { related_ids: { order_id: o.id } },
+      };
       o.captures.push(capture);
       o.status = "COMPLETED";
-      const body = { ...publicOrder(o), purchase_units: [{ ...pu, payments: { captures: [capture] } }] };
+      // PayPal's default is Prefer: return=minimal => ONLY id, status and links. The full resource (with
+      // purchase_units[].payments.captures[]) is returned only for Prefer: return=representation.
+      const prefer = String(req.headers["prefer"] ?? "return=minimal");
+      o.lastCapturePrefer = prefer;
+      const body = prefer.includes("return=representation")
+        ? { ...publicOrder(o), purchase_units: [{ ...pu, payments: { captures: [capture] } }] }
+        : { id: o.id, status: "COMPLETED", links: [] };
       if (key) idem.set(key, { status: 201, body });
       setImmediate(() => deliver("PAYMENT.CAPTURE.COMPLETED", capture)); // async, like real PayPal
       return send(res, 201, body);
@@ -185,7 +199,17 @@ const server = http.createServer(async (req, res) => {
     const st = m(/^\/sim\/orders\/([^/]+)$/);
     if (req.method === "GET" && st) {
       const o = orders.get(st[1]);
-      return o ? send(res, 200, { status: o.status, captures: o.captures.length, order: publicOrder(o) }) : send(res, 404, { error: "no such order" });
+      return o ? send(res, 200, { status: o.status, captures: o.captures.length, lastCapturePrefer: o.lastCapturePrefer ?? null, order: publicOrder(o) }) : send(res, 404, { error: "no such order" });
+    }
+    // Inject a signed PAYMENT.CAPTURE.COMPLETED for an order SentinelPay never authorized (provenance test).
+    if (req.method === "POST" && path === "/sim/events/capture") {
+      const b = (await readJson(req)) ?? {};
+      const capture = {
+        id: b.capture_id ?? `CAP-${randomUUID().slice(0, 12).toUpperCase()}`, status: "COMPLETED",
+        amount: { currency_code: "USD", value: b.value ?? "10.00" }, custom_id: b.custom_id,
+        ...(b.order_id ? { supplementary_data: { related_ids: { order_id: b.order_id } } } : {}),
+      };
+      return send(res, 200, { deliveries: await deliver("PAYMENT.CAPTURE.COMPLETED", capture), captureId: capture.id });
     }
     if (req.method === "GET" && path === "/sim/deliveries") return send(res, 200, deliveries);
 

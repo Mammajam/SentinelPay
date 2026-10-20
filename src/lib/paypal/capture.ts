@@ -36,6 +36,10 @@ export async function captureOrder(
       method: "POST",
       body: "{}",
       requestId: rid,
+      // PayPal defaults to `Prefer: return=minimal`, which returns ONLY {id, status, links}. We must see
+      // purchase_units[].payments.captures[].status (a COMPLETED order can still hold a DECLINED/PENDING capture),
+      // so ask for the full representation. (Found via APIMatic's PayPal SDK map + PayPal's capture reference.)
+      prefer: "return=representation",
     });
   } catch {
     return { status: "FAILED", http: 0, requestId: rid, ambiguous: true, action: { type: "HALT", reason: "Transport error; outcome unknown. Reconcile before re-triggering" } };
@@ -53,7 +57,8 @@ export async function captureOrder(
   if (res.ok) {
     const cap = body?.purchase_units?.[0]?.payments?.captures?.[0];
     if (cap?.id && cap.status === "COMPLETED") return { status: "CAPTURED", captureId: cap.id, requestId: rid };
-    // 2xx without a completed capture is NOT success.
+    // 2xx without a completed capture is NOT success. A minimal body (no purchase_units) means PayPal ignored our
+    // Prefer header: we cannot see the capture's status, so reconcile (webhook / GET order) instead of guessing.
     return { status: "FAILED", http: res.status, requestId: rid, ambiguous: true, action: { type: "HALT", reason: "Capture response not COMPLETED" } };
   }
 

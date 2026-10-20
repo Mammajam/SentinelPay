@@ -3,7 +3,7 @@ import { verifyWebhook, devCertOrigin } from "@/lib/paypal/webhook.ts";
 import { orderToCart, toMinor } from "@/lib/paypal/orders.ts";
 import { captureOrder } from "@/lib/paypal/capture.ts";
 import { evaluate } from "@/lib/policy/evaluate.ts";
-import { claimWebhookEvent, getPolicy, merchantBelongsToTenant, recordSpend, releaseWebhookEvent, spentInWindow } from "@/lib/db/store.ts";
+import { captureHasProvenance, claimWebhookEvent, getPolicy, merchantBelongsToTenant, recordSpend, releaseWebhookEvent, spentInWindow } from "@/lib/db/store.ts";
 import { appendAudit } from "@/lib/db/audit.ts";
 import { log } from "@/lib/log.ts";
 
@@ -26,6 +26,7 @@ const CaptureResource = z.object({
   id: z.string().min(1),
   custom_id: z.uuid().optional(),
   amount: z.object({ currency_code: z.string(), value: z.string() }),
+  supplementary_data: z.object({ related_ids: z.object({ order_id: z.string().optional() }).optional() }).optional(),
 });
 
 export async function POST(req: Request) {
@@ -103,11 +104,19 @@ export async function POST(req: Request) {
     } else if (evt.event_type === "PAYMENT.CAPTURE.COMPLETED") {
       const cap = CaptureResource.safeParse(evt.resource);
       if (!cap.success || !cap.data.custom_id) {
-        await appendAudit("capture.unattributed", { eventId: evt.id });
+        await appendAudit("capture.unattributed", { eventId: evt.id, reason: "missing_custom_id" });
       } else {
-        const minor = toMinor(cap.data.amount.value, cap.data.amount.currency_code);
-        const fresh = await recordSpend(cap.data.custom_id, cap.data.id, minor, cap.data.amount.currency_code);
-        await appendAudit("capture.recorded", { eventId: evt.id, captureId: cap.data.id, policyId: cap.data.custom_id, amount: minor, newlyRecorded: fresh });
+        const orderId = cap.data.supplementary_data?.related_ids?.order_id ?? null;
+        // Provenance: only count a capture SentinelPay authorized (otherwise a signed event for someone else's order
+        // could burn a policy's cumulative budget).
+        if (!(await captureHasProvenance(cap.data.custom_id, orderId, cap.data.id))) {
+          await appendAudit("capture.unattributed", { eventId: evt.id, captureId: cap.data.id, policyId: cap.data.custom_id, orderId, reason: "no_authorization" });
+          log("WARNING", "capture.unattributed", { reason: "no_authorization" });
+        } else {
+          const minor = toMinor(cap.data.amount.value, cap.data.amount.currency_code);
+          const fresh = await recordSpend(cap.data.custom_id, cap.data.id, minor, cap.data.amount.currency_code);
+          await appendAudit("capture.recorded", { eventId: evt.id, captureId: cap.data.id, policyId: cap.data.custom_id, amount: minor, newlyRecorded: fresh });
+        }
       }
     } else {
       await appendAudit("webhook.received", { eventId: evt.id, type: evt.event_type });

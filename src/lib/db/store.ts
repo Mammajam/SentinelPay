@@ -233,3 +233,23 @@ export async function listMerchants(tenantId: string) {
   const { rows } = await db().query('SELECT merchant_id AS "merchantId" FROM tenant_merchants WHERE tenant_id = $1 ORDER BY merchant_id', [tenantId]);
   return rows as Array<{ merchantId: string }>;
 }
+
+/**
+ * T21 — capture provenance. A PAYMENT.CAPTURE.COMPLETED event may add to a policy's spend ONLY if SentinelPay itself
+ * authorized it: an order.inspected ALLOW (written BEFORE we call capture, so there is no race with the webhook), a
+ * human re-trigger for that order, or our own recorded capture id. `orderId` comes from the capture's
+ * supplementary_data.related_ids.order_id (may be absent: then only our own capture id can vouch for it).
+ */
+export async function captureHasProvenance(policyId: string, orderId: string | null, captureId: string): Promise<boolean> {
+  const { rows } = await db().query(
+    `SELECT 1 FROM audit_log
+      WHERE (
+              ($2::text IS NOT NULL AND payload->>'policyId' = $1 AND payload->>'orderId' = $2
+                 AND (kind = 'order.capture_retriggered' OR (kind = 'order.inspected' AND payload->>'decision' = 'ALLOW')))
+           OR (kind = 'order.captured' AND payload->>'policyId' = $1 AND payload->>'captureId' = $3)
+            )
+      LIMIT 1`,
+    [policyId, orderId, captureId],
+  );
+  return rows.length > 0;
+}

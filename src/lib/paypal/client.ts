@@ -47,6 +47,8 @@ export interface PayPalInit {
   body?: string;
   /** Sent as PayPal-Request-Id (idempotency). */
   requestId?: string;
+  /** Sent as `Prefer`. PayPal's DEFAULT is return=minimal (id, status, links only). */
+  prefer?: "return=minimal" | "return=representation";
 }
 
 export type PayPalCall = (path: string, init?: PayPalInit) => Promise<Response>;
@@ -57,6 +59,7 @@ export const paypalFetch: PayPalCall = async (path, init = {}) => {
     "content-type": "application/json",
   };
   if (init.requestId) headers["paypal-request-id"] = init.requestId;
+  if (init.prefer) headers["prefer"] = init.prefer;
   return fetch(`${baseUrl()}${path}`, {
     method: init.method ?? "GET",
     headers,

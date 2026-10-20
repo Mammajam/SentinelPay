@@ -81,6 +81,11 @@ export const Cart = z.object({
   lines: z.array(CartLine).min(1),
   tax: Minor,
   shipping: Minor,
+  /** PayPal amount.breakdown components. total = lines + tax + shipping + handling + insurance - shippingDiscount - discount. */
+  handling: Minor.default(0),
+  insurance: Minor.default(0),
+  shippingDiscount: Minor.default(0),
+  discount: Minor.default(0),
   /** Total the payment rail will actually charge. Must reconcile with lines. */
   total: Minor,
 });

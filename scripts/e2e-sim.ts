@@ -67,7 +67,7 @@ process.on("exit", stopAll);
 
 /* ---------------- domain helpers ---------------- */
 interface Delivery { eventType: string; status: number; body: string }
-interface SimOrder { status: string; captures: number }
+interface SimOrder { status: string; captures: number; lastCapturePrefer?: string | null }
 
 async function makePolicy(tenantId: string, rules: unknown[]): Promise<string> {
   const compiled = Policy.parse({ version: 1, currency: "USD", rules });
@@ -83,7 +83,7 @@ async function makeDraft(tenantId: string) {
 }
 const HAPPY = [{ kind: "max_total", amount: 120_000 }, { kind: "max_tax_shipping", amount: 15_000 }];
 
-async function createOrder(o: { policyId: string; item: string; tax?: string; ship?: string; invoice?: string; total: string; merchant?: string }) {
+async function createOrder(o: { policyId: string; item: string; tax?: string; ship?: string; invoice?: string; total: string; merchant?: string; handling?: string; insurance?: string; discount?: string; shipDiscount?: string }) {
   const res = await fetch(`${SIM}/v2/checkout/orders`, {
     method: "POST",
     headers: { authorization: "Bearer x", "content-type": "application/json", "paypal-request-id": randomUUID() },
@@ -93,7 +93,9 @@ async function createOrder(o: { policyId: string; item: string; tax?: string; sh
         custom_id: o.policyId,
         invoice_id: o.invoice ?? `INV-${randomUUID()}`,
         payee: { merchant_id: o.merchant ?? MA },
-        amount: { currency_code: "USD", value: o.total, breakdown: { item_total: { currency_code: "USD", value: o.item }, tax_total: { currency_code: "USD", value: o.tax ?? "80.00" }, shipping: { currency_code: "USD", value: o.ship ?? "20.00" } } },
+        amount: { currency_code: "USD", value: o.total, breakdown: { item_total: { currency_code: "USD", value: o.item }, tax_total: { currency_code: "USD", value: o.tax ?? "80.00" }, shipping: { currency_code: "USD", value: o.ship ?? "20.00" },
+          ...(o.handling ? { handling: { currency_code: "USD", value: o.handling } } : {}), ...(o.insurance ? { insurance: { currency_code: "USD", value: o.insurance } } : {}),
+          ...(o.discount ? { discount: { currency_code: "USD", value: o.discount } } : {}), ...(o.shipDiscount ? { shipping_discount: { currency_code: "USD", value: o.shipDiscount } } : {}) } },
         items: [{ name: "Laptop", sku: "LAP1", quantity: "1", unit_amount: { currency_code: "USD", value: o.item } }],
       }],
     }),
@@ -529,6 +531,43 @@ async function run() {
   const bMer = (await (await dget("/api/admin/merchants", bcookie)).json()) as { merchants: Array<{ merchantId: string }> };
   check("merchants are tenant-bound (A has MA only, B has MB only)", aMer.merchants.map((m) => m.merchantId).join() === MA && bMer.merchants.map((m) => m.merchantId).join() === MB, { aMer, bMer });
   check("keys/merchants: no cookie => 401", (await dget("/api/admin/keys", null)).status === 401 && (await dget("/api/admin/merchants", null)).status === 401);
+
+  section("S33 PayPal fidelity (found via APIMatic SDK map): capture asks for Prefer: return=representation");
+  check("the app's capture request carried Prefer: return=representation", (await simOrder(o1)).lastCapturePrefer === "return=representation", (await simOrder(o1)).lastCapturePrefer);
+  const pPref = await makePolicy(TA, HAPPY);
+  const oPref = (await createOrder({ policyId: pPref, ...GOOD })).body.id;
+  await approve(oPref, { webhook_fault: "tamper" }); // approved at the simulator, but the app (correctly) ignored the forged webhook
+  const bare = await fetch(`${SIM}/v2/checkout/orders/${oPref}/capture`, { method: "POST", headers: { authorization: "Bearer x", "content-type": "application/json", "paypal-request-id": randomUUID() }, body: "{}" });
+  const bareJson = (await bare.json()) as { id?: string; status?: string; purchase_units?: unknown };
+  check("without the header the simulator behaves like PayPal: MINIMAL body (id, status, links only)", bare.status === 201 && bareJson.status === "COMPLETED" && bareJson.purchase_units === undefined, bareJson);
+
+  section("S34 Capture provenance (T21): a signed capture event for an order SentinelPay never authorized is NOT counted");
+  const pProv = await makePolicy(TA, [...HAPPY, { kind: "cumulative_budget", amount: 150_000, windowDays: 30 }]);
+  const inject = async (body: Record<string, string>) => ((await (await fetch(`${SIM}/sim/events/capture`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json()) as { deliveries: Delivery[]; captureId: string });
+  const foreign = await inject({ custom_id: pProv, order_id: "ORD-NEVER-AUTHORIZED", value: "1400.00" });
+  check("webhook accepted the (validly signed) event", foreign.deliveries[0]?.status === 200, foreign.deliveries[0]);
+  const noRel = await inject({ custom_id: pProv, value: "1400.00" });
+  check("event with no related order id is accepted but also not counted", noRel.deliveries[0]?.status === 200);
+  await until(async () => (await audit(pProv)).filter((e) => e.kind === "capture.unattributed").length >= 2);
+  const unattr = (await audit(pProv)).filter((e) => e.kind === "capture.unattributed");
+  check("both were audited as capture.unattributed (no_authorization)", unattr.length >= 2 && unattr.every((e) => e.payload.reason === "no_authorization"), unattr.map((e) => e.payload));
+  check("NOTHING was written to the spend ledger (the budget cannot be burned)", (await ledger(pProv)).length === 0);
+  const legit = (await createOrder({ policyId: pProv, ...GOOD })).body.id;
+  await approve(legit);
+  check("a capture SentinelPay did authorize is still recorded", Boolean(await until(async () => (await ledger(pProv)).length === 1)), await ledger(pProv));
+
+  section("S35 Breakdown fidelity: handling, insurance and discounts reconcile; fees count toward the tax+shipping cap");
+  const pBrk = await makePolicy(TA, HAPPY);
+  // 1000 + 80 + 20 + 10 handling + 5 insurance - 5 shipping discount - 50 discount = 1060.00
+  const oBrk = (await createOrder({ policyId: pBrk, item: "1000.00", handling: "10.00", insurance: "5.00", shipDiscount: "5.00", discount: "50.00", total: "1060.00" })).body.id;
+  await approve(oBrk);
+  check("order with a coupon + fees is ALLOWED and captured (not falsely denied)", (await simOrder(oBrk)).captures === 1 && (await until(async () => (await ledger(pBrk)).some((r) => r.amount === 106_000))) !== undefined, await ledger(pBrk));
+  const pBrk2 = await makePolicy(TA, HAPPY);
+  // handling 60 pushes tax+shipping+handling to 160 > 150 even though the total (1160) is within the $1,200 cap
+  const oBrk2 = (await createOrder({ policyId: pBrk2, item: "1000.00", handling: "60.00", total: "1160.00" })).body.id;
+  await approve(oBrk2);
+  const brk2 = (await audit(pBrk2)).find((e) => e.kind === "order.inspected");
+  check("handling over the tax+shipping cap => REQUIRE_REAUTH, NOT captured", brk2?.payload.decision === "REQUIRE_REAUTH" && (await simOrder(oBrk2)).captures === 0, brk2?.payload);
 
   section("S15 Audit chain integrity after everything above (incl. concurrent writes)");
   check("hash chain verifies end-to-end", (await verifyStoredChain()) === null, await verifyStoredChain());

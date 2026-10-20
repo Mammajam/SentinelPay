@@ -46,7 +46,9 @@ function run(policy: PolicyT, cart: CartT, ctx: EvalContext): Evaluation {
 
   // Reconcile arithmetic: never trust a total the agent/merchant asserts.
   const subtotal = cart.lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
-  if (subtotal + cart.tax + cart.shipping !== cart.total) {
+  // PayPal: amount = item_total + tax_total + shipping + handling + insurance - shipping_discount - discount
+  const charges = cart.tax + cart.shipping + cart.handling + cart.insurance; // gross: discounts never loosen a cap
+  if (subtotal + charges - cart.shippingDiscount - cart.discount !== cart.total) {
     hard.push(v("integrity", "TOTAL_DOES_NOT_RECONCILE", "total != lines + tax + shipping"));
   }
 
@@ -56,8 +58,8 @@ function run(policy: PolicyT, cart: CartT, ctx: EvalContext): Evaluation {
         if (cart.total > rule.amount) soft.push(v(rule.kind, "TOTAL_EXCEEDED", `Total ${cart.total} > ${rule.amount}`));
         break;
       case "max_tax_shipping":
-        if (cart.tax + cart.shipping > rule.amount)
-          soft.push(v(rule.kind, "TAX_SHIPPING_EXCEEDED", `Tax+shipping ${cart.tax + cart.shipping} > ${rule.amount}`));
+        if (charges > rule.amount)
+          soft.push(v(rule.kind, "TAX_SHIPPING_EXCEEDED", `Tax+shipping+handling ${charges} > ${rule.amount}`));
         break;
       case "max_item_price":
         for (const l of cart.lines)
