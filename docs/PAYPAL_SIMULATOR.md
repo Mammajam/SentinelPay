@@ -5,7 +5,7 @@
 ## Run
 ```bash
 npm run sim            # simulator on :4010 (webhooks -> SIM_WEBHOOK_URL, default :3000)
-npm run e2e:sim        # boots simulator + app, runs 120 checks against your Neon DB
+npm run e2e:sim        # boots simulator + app, runs 168 checks against your Neon DB
 ```
 `e2e:sim` writes test rows (owner `e2e`) to the database in `DATABASE_URL`. The audit log is append-only by design, so those rows are permanent; use a dev database.
 
@@ -25,6 +25,9 @@ OAuth token · Orders v2 create/get/capture · `PayPal-Request-Id` idempotency �
 ## Safety rails
 - The verifier trusts only `https://*.paypal.com` cert URLs. The simulator's `http://localhost` origin is allowed **only** when `devCertOrigin()` proves a local dev setup: `NODE_ENV != production`, loopback PayPal base URL, loopback `http` cert origin. Unit-tested in `tests/sim.test.ts`; `next start` (production) can never enable it.
 - `src/lib/paypal/client.ts` refuses `api-m.paypal.com` / `api.paypal.com` unless `PAYPAL_ALLOW_LIVE=1`.
+
+## Fidelity changes (2026-10-20, from the APIMatic verification)
+The simulator used to be MORE forgiving than PayPal, which hid a real bug. It now: (1) defaults capture to PayPal's `Prefer: return=minimal` reply (`{id,status,links}` only) and returns the full resource only for `Prefer: return=representation`; (2) validates PayPal's amount equation including handling, insurance, shipping_discount and discount; (3) puts `supplementary_data.related_ids.order_id` on capture resources; (4) exposes `POST /sim/events/capture` to inject a signed capture event for an order SentinelPay never authorized (provenance test); (5) reports the `Prefer` header the app sent in `GET /sim/orders/:id`.
 
 ## Known gap: buyer/seller accounts are NOT modelled
 The simulator has no personal (buyer) or business (seller) accounts. A "seller" is only the `payee.merchant_id` string on an order (bound to a tenant in SentinelPay), and there is no payer identity, funding source, balance, login, or approval screen: approval is a simulator-only call. So it exercises SentinelPay's logic, not the buyer or seller *experience*. Adding it means: payer accounts with funding sources/balances (insufficient funds, expired card), a payer-approval step, merchant accounts with fee/payout and Seller-Protection states, and refunds/disputes. See the answer in the project notes before building.

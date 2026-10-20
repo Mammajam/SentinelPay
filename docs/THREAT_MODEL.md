@@ -41,7 +41,7 @@ Decision values: `ALLOW | REQUIRE_REAUTH | DENY`. `ALLOW` is returned only when 
 | T18 | Dashboard session theft / CSRF | HttpOnly, SameSite=Strict, 30-min HMAC-signed cookie; grants **read-only** access; mutating APIs ignore it (Bearer + MFA only) | M |
 | T19 | Operator-assistant prompt injection | Tool set is read-only/dry-run (a unit test forbids write-ish tool names); tenant bound from the key, not tool args; args zod-validated; unknown tools refused; results capped; step-bounded | M |
 | T20 | External agent (Agent Studio) over-reach | OpenAPI exposes exactly two operations (`validateCart`, `getPolicy`); no compile/activate/capture; agent keys are tenant-scoped and rate-limited | M |
-| T21 | Capture event attributed to a policy it was not authorized under | `PAYMENT.CAPTURE.COMPLETED` is attributed via `custom_id`; the order-approval path is merchant-bound, but the capture handler does not re-check provenance. Needs the order-id link from real PayPal payloads | O |
+| T21 | Capture event attributed to a policy it was not authorized under | `PAYMENT.CAPTURE.COMPLETED` writes to the spend ledger only if the capture traces to an order SentinelPay authorized (`order.inspected` ALLOW or a human re-trigger for `supplementary_data.related_ids.order_id` under the same policy, or our own recorded capture id); otherwise audited as `capture.unattributed` and not counted. Verified by e2e S34. Residual: relies on PayPal including `related_ids` (else only our own capture id vouches: fails closed) | M (was open) |
 
 | T22 | Abuse of the capture re-trigger (moving money) | Admin Bearer key + single-use TOTP (cookie rejected); order must be in the caller tenant's open-failure queue; PayPal asked for CURRENT order state (only APPROVED proceeds); policy + merchant binding re-evaluated now; same request id reused after an ambiguous failure; attempts counted in the audit log; per-tenant rate limit | M |
 
@@ -51,4 +51,4 @@ Decision values: `ALLOW | REQUIRE_REAUTH | DENY`. `ALLOW` is returned only when 
 ## Open items
 - **O1** Enforce SentinelPay as the *only* capture path (PayPal-side credential scoping / merchant config).
 - **O4** External anchoring of audit chain head (e.g., periodic hash to object-lock storage).
-- External IdP/SSO and managed secret store (T6, T14); external anchor sink in production (T11); capture provenance (T21).
+- External IdP/SSO and managed secret store (T6, T14); external anchor sink in production (T11).

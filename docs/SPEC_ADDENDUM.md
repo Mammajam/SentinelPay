@@ -23,3 +23,6 @@ Checked against PayPal developer docs via web research this session. **Verified*
 - **O6** (superseded 2026-10-20) The AI model is now Anthropic Claude; the swap touched only `src/lib/agent/compiler.ts` and `assistant.ts`.
 
 Sources: PayPal ValidationIssue definition (developer.paypal.com/api/agentic-commerce/v1/definitions/validationissue); Agent Ready overview (developer.paypal.com/agent-ready/overview); docs.paypal.ai agentic-commerce pages.
+
+## Update 2026-10-20: APIMatic-assisted contract check
+See `docs/APIMATIC_VERIFICATION.md`. Net effect on this addendum: **Orders v2 request/response shapes and enums now MATCH** a generated SDK map and PayPal's reference (not a sandbox); **two mismatches fixed** (capture `Prefer: return=minimal` default; amount breakdown equation); **T21 closed**. **O5 remains open** for: error `issue` strings, webhook signature scheme and event shapes, OAuth endpoint path, currency exponents (none of which that toolchain covers).

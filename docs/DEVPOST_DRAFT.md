@@ -8,9 +8,10 @@
 | Area | State | Gap |
 |---|---|---|
 | **AI** | **Strong, verified live on production (2026-10-20).** Claude (`claude-sonnet-5-5`) compiles natural-language spending rules into validated policies; a prompt-injection directive compiled to a harmless `$0` limit; a "never more than 2 units" limit that an earlier model dropped is now captured as a rule. An operator assistant answers with read-only/dry-run tools and **refuses** to activate policies or move money. An OpenAPI tool lets an external agent (Google Agent Studio) call the guardrail. | Agent Studio import not tested in a real Agent Studio project. |
-| **Dashboard** | **AG Grid Community (MIT)** powers the Decisions and Exceptions views: sorting, column filters, pagination, red rows for price/integrity violations (light + dark theme), a Live mode that merges new decisions every 5 s, and CSV export hardened against spreadsheet-formula injection. Verified visually in a browser. | AG Grid sponsor-prize rules not yet read (Community vs Enterprise eligibility unknown). |
+| **Dashboard** | **AG Grid Community (MIT)** powers **six tabs** (Decisions, Policies, Exceptions, Audit explorer, Ledger, Access): sorting, column filters, pagination, red rows for price/integrity violations (light + dark theme), a Live mode that merges new decisions every 5 s, and CSV export hardened against spreadsheet-formula injection. Verified visually in a browser. | AG Grid sponsor-prize rules not yet read (Community vs Enterprise eligibility unknown). |
 | **PayPal** | **Weak spot.** Implements Orders v2 capture with idempotency, webhook signature verification, agentic-commerce error handling, merchant binding. Verified against a **local simulator I wrote from PayPal's docs**, not against PayPal. | **No call has been made to the real PayPal sandbox** (no sandbox account). Judges will likely expect a real sandbox integration. **Highest-priority gap.** |
-| Product & engineering | Strong: deployed, 134-check e2e suite, threat model, audit chain with external anchors, p95 137 ms. | Demo video, screenshots, polished README front page. |
+| **PayPal contract checks (APIMatic)** | APIMatic's PayPal Context Plugin (skills + generated SDK map) was used as a dev-time reference and **found two real defects** (capture assumed a full response although PayPal defaults to `Prefer: return=minimal`; carts ignored handling/insurance/discounts) plus closed threat T21 (capture provenance). Negative control: removing the fix makes 8 e2e checks fail. | Evidence is documentation-level; no real sandbox call yet. Plugin not installed into an assistant (the CLI was unavailable here); the content was read directly at pinned commits. Sponsor-prize rules unread. |
+| Product & engineering | Strong: deployed, 168-check e2e suite, threat model, audit chain with external anchors, p95 137 ms. | Demo video, screenshots, polished README front page. |
 
 ## What remains before submitting (priority order)
 1. **Get real PayPal sandbox access** (blocking for credibility). Ask the hackathon organisers/Discord/Devpost Q&A (the event is open "from around the world") and PayPal developer support how to get sandbox credentials from Liberia, or use a teammate's sandbox app. Then: real create-order → approve → webhook → capture through SentinelPay, record it on video, run the e2e scenario runner against the sandbox base URL, and verify webhook signatures with real PayPal certs (closes O5).
@@ -41,10 +42,10 @@
 
 **Challenges.** Models drop or invent constraints, so every model output is untrusted and the human reads back exactly what will be enforced. A model that silently dropped a stated limit (fixed by a stricter prompt and caught by the human readback). Cutting p95 latency from ~325 ms to 137 ms by removing a global audit lock (group commit) and caching only on the advisory path. Making retries safe when a capture's outcome is unknown.
 
-**Accomplishments.** Fail-closed by design; 134 end-to-end checks including forged/replayed webhooks, cross-tenant attacks, MFA replay and concurrency; load-tested at 76 req/s; tamper-evident audit.
+**Accomplishments.** Fail-closed by design; 168 end-to-end checks including forged/replayed webhooks, cross-tenant attacks, MFA replay and concurrency; load-tested at 76 req/s; tamper-evident audit.
 
 **What we learned.** The model should narrate, never decide; most agent-payment risk is in retries, ambiguity and stale state.
 
 **What's next.** Real merchant onboarding via Store Sync price baselines, Agent Payments Protocol support, broader rule types, SSO.
 
-**Built with:** TypeScript, Next.js, AG Grid Community, Google Cloud Run, Anthropic Claude API, Neon/Postgres, PayPal REST (Orders v2, Webhooks), Cloud Build, Secret Manager, Cloud Scheduler, Cloud Storage.
+**Built with:** TypeScript, Next.js, AG Grid Community, APIMatic Context Plugin (PayPal), Google Cloud Run, Anthropic Claude API, Neon/Postgres, PayPal REST (Orders v2, Webhooks), Cloud Build, Secret Manager, Cloud Scheduler, Cloud Storage.
