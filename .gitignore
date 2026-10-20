@@ -42,3 +42,6 @@ next-env.d.ts
 
 # keep the committed template
 !.env.example
+
+# exported operator data (may contain business data); never commit
+sentinelpay-decisions*.csv
