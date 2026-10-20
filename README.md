@@ -44,7 +44,7 @@ The hosted demo is login-gated and tenant-scoped. **Test credentials (a throwawa
      -d '{"policyId":"<POLICY_ID>","cart":{"cartId":"demo-1","merchantId":"<MERCHANT_ID>","currency":"USD",
           "lines":[{"sku":"LAPTOP","quantity":1,"unitPrice":99900}],"tax":8000,"shipping":2000,"total":109900}}'
    ```
-   Money is **integer cents**. A cart over the policy limit returns `DENY` with reason codes.
+   Money is **integer cents**. A cart over a limit returns `REQUIRE_REAUTH` (or `DENY` for integrity problems such as a price mismatch) with reason codes.
 4. Compile your own rule (draft only, nothing is activated): `POST /api/policies/compile` with the admin key and `{"directive":"laptop under $1,200, tax + shipping under $150, never more than 2 units"}`. The response shows the plain-language readback.
 
 ### Option B: run it yourself (about 10 minutes, no PayPal account needed)
