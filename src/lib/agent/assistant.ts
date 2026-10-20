@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { GoogleGenAI, type Content } from "@google/genai";
+import Anthropic from "@anthropic-ai/sdk";
 import { evaluate } from "../policy/evaluate.ts";
 import { readback } from "../policy/readback.ts";
 import { getPolicyForTenant, merchantBelongsToTenant, recentValidations, spentInWindow } from "../db/store.ts";
 
 /**
- * SentinelPay operator assistant (Gemini function-calling loop).
+ * SentinelPay operator assistant (Claude tool-use loop).
  *
  * SAFETY DESIGN — the model is an untrusted narrator, not an actor:
  *  1. Tools are READ-ONLY or DRY-RUN. There is no tool that compiles, activates, revokes, captures
@@ -56,19 +56,19 @@ export const TOOL_DECLARATIONS = [
   {
     name: "list_recent_decisions",
     description: "List this tenant's most recent cart-validation decisions (ALLOW / REQUIRE_REAUTH / DENY) with their violation codes.",
-    parametersJsonSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 20 } } },
+    input_schema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 20 } } },
   },
   {
     name: "explain_policy",
     description: "Plain-language list of the rules in one of this tenant's policies, and its status.",
-    parametersJsonSchema: { type: "object", properties: { policy_id: { type: "string" } }, required: ["policy_id"] },
+    input_schema: { type: "object", properties: { policy_id: { type: "string" } }, required: ["policy_id"] },
   },
   {
     name: "dry_run_cart",
     description:
       "Evaluate a hypothetical cart against a policy WITHOUT recording or authorizing anything. " +
       "ALL money is integer cents ($1,300.00 = 130000). Do not compute a total: it is calculated for you.",
-    parametersJsonSchema: {
+    input_schema: {
       type: "object",
       properties: {
         policy_id: { type: "string" },
@@ -130,14 +130,14 @@ export async function executeTool(name: string, rawArgs: unknown, backend: ToolB
 }
 
 /* ---------------- model abstraction (swappable / testable) ---------------- */
-export interface ToolCall { name: string; args: unknown }
+export interface ToolCall { id?: string; name: string; args: unknown }
 export type Turn =
   | { role: "user"; text: string }
-  | { role: "model"; text?: string; calls: ToolCall[]; raw?: Content }
-  | { role: "tool"; name: string; result: unknown };
+  | { role: "model"; text?: string; calls: ToolCall[]; raw?: Anthropic.ContentBlock[] }
+  | { role: "tool"; id?: string; name: string; result: unknown };
 
 export interface AssistantModel {
-  next(history: Turn[]): Promise<{ text?: string; calls: ToolCall[]; raw?: Content }>;
+  next(history: Turn[]): Promise<{ text?: string; calls: ToolCall[]; raw?: Anthropic.ContentBlock[] }>;
 }
 
 const SYSTEM = `You are the SentinelPay operator assistant. You help a merchant operator understand spending-guardrail
@@ -159,44 +159,53 @@ export async function runAssistant(question: string, backend: ToolBackend, model
     history.push({ role: "model", text: out.text, calls: out.calls, raw: out.raw });
     for (const c of out.calls.slice(0, 4)) {
       toolsUsed.push(c.name);
-      history.push({ role: "tool", name: c.name, result: await executeTool(c.name, c.args, backend) });
+      history.push({ role: "tool", id: c.id, name: c.name, result: await executeTool(c.name, c.args, backend) });
     }
   }
   return { answer: "I could not finish within the allowed number of steps.", toolsUsed, steps: maxSteps };
 }
 
-/* ---------------- Gemini / GEAP implementation ---------------- */
-export class GeminiAssistantModel implements AssistantModel {
-  private ai: GoogleGenAI;
+/* ---------------- Claude implementation ---------------- */
+export class ClaudeAssistantModel implements AssistantModel {
+  private client: Anthropic;
   private model: string;
   constructor(env: NodeJS.ProcessEnv = process.env) {
-    this.model = env.GEAP_MODEL ?? "gemini-2.5-flash";
-    this.ai = env.GEAP_PROJECT
-      ? new GoogleGenAI({ vertexai: true, project: env.GEAP_PROJECT, location: env.GEAP_LOCATION ?? "us-central1" })
-      : new GoogleGenAI({ apiKey: env.GOOGLE_API_KEY });
+    this.model = env.ANTHROPIC_MODEL ?? "claude-opus-5-5";
+    this.client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
   }
 
   async next(history: Turn[]) {
-    const contents: Content[] = history.map((t): Content => {
-      if (t.role === "user") return { role: "user", parts: [{ text: t.text }] };
-      if (t.role === "tool") return { role: "user", parts: [{ functionResponse: { name: t.name, response: { output: t.result } } }] };
-      // Replay the model's own content verbatim when we have it (keeps thought signatures intact).
-      return t.raw ?? { role: "model", parts: [...(t.text ? [{ text: t.text }] : []), ...t.calls.map((c) => ({ functionCall: { name: c.name, args: c.args as Record<string, unknown> } }))] };
-    });
-    const res = await this.ai.models.generateContent({
+    const messages: Anthropic.MessageParam[] = [];
+    for (const t of history) {
+      if (t.role === "user") messages.push({ role: "user", content: t.text });
+      else if (t.role === "model") {
+        // Replay the model's own content verbatim when we have it (keeps thinking blocks intact).
+        messages.push({ role: "assistant", content: t.raw ?? [...(t.text ? [{ type: "text" as const, text: t.text }] : [])] });
+      } else {
+        // All tool results for one assistant turn go back together in a single user message.
+        const block = { type: "tool_result" as const, tool_use_id: t.id ?? "", content: JSON.stringify(t.result) };
+        const last = messages[messages.length - 1];
+        if (last?.role === "user" && Array.isArray(last.content) && last.content.every((c) => c.type === "tool_result")) last.content.push(block);
+        else messages.push({ role: "user", content: [block] });
+      }
+    }
+    const res = await this.client.messages.create({
       model: this.model,
-      contents,
-      config: { systemInstruction: SYSTEM, temperature: 0, tools: [{ functionDeclarations: [...TOOL_DECLARATIONS] }] },
+      max_tokens: 4000,
+      system: SYSTEM,
+      messages,
+      tools: [...TOOL_DECLARATIONS] as unknown as Anthropic.Tool[],
+      output_config: { effort: "medium" },
     });
     return {
-      text: res.text,
-      calls: (res.functionCalls ?? []).map((c) => ({ name: c.name ?? "", args: c.args })),
-      raw: res.candidates?.[0]?.content,
+      text: res.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("") || undefined,
+      calls: res.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use").map((b) => ({ id: b.id, name: b.name, args: b.input })),
+      raw: res.content,
     };
   }
 }
 
 export function getAssistantModel(): AssistantModel {
-  if (!process.env.GEAP_PROJECT && !process.env.GOOGLE_API_KEY) throw new Error("assistant model not configured");
-  return new GeminiAssistantModel();
+  if (!process.env.ANTHROPIC_API_KEY) throw new Error("assistant model not configured");
+  return new ClaudeAssistantModel();
 }

@@ -365,7 +365,7 @@ async function run() {
   check("assistant: no key => 401", (await api("/api/agent/assistant", null, { question: "hello there" })).status === 401);
   check("assistant: agent key => 403", (await api("/api/agent/assistant", agentA.key, { question: "hello there" })).status === 403);
   const live = await api("/api/agent/assistant", adminA.key, { question: "How many of my recent carts were denied?" });
-  console.log(`  ℹ live assistant call (needs Gemini billing): HTTP ${live.status}${live.status === 200 ? " (model reachable)" : " (model unavailable/unfunded — not a code failure)"}`);
+  console.log(`  ℹ live assistant call (needs ANTHROPIC_API_KEY): HTTP ${live.status}${live.status === 200 ? " (model reachable)" : " (model unavailable/unfunded — not a code failure)"}`);
 
   section("S25 Dashboard read APIs: session-only, tenant-scoped, paginated, filterable");
   const dl = await api("/api/admin/login", null, { key: adminDash.key, totp: code(adminDash.totpSecret!) }, { "x-forwarded-for": `10.9.9.${Math.floor(Math.random() * 200)}` });

@@ -7,7 +7,7 @@
 ## Honest readiness vs. "meaningfully use PayPal and AI"
 | Area | State | Gap |
 |---|---|---|
-| **AI** | **Strong.** Gemini (Vertex AI) compiles natural-language spending rules into validated policies; an operator assistant answers questions with read-only/dry-run tools and refuses to move money; an OpenAPI tool lets an external agent (Google Agent Studio) call the guardrail. Verified live on Cloud Run. | Agent Studio import not tested in a real Agent Studio project. |
+| **AI** | **Strong.** Claude compiles natural-language spending rules into validated policies; an operator assistant answers questions with read-only/dry-run tools and refuses to move money; an OpenAPI tool lets an external agent (Google Agent Studio) call the guardrail. Deployed on Cloud Run; **live Claude calls not yet verified after the Gemini→Claude swap**. | Agent Studio import not tested in a real Agent Studio project. |
 | **PayPal** | **Weak spot.** Implements Orders v2 capture with idempotency, webhook signature verification, agentic-commerce error handling, merchant binding. Verified against a **local simulator I wrote from PayPal's docs**, not against PayPal. | **No call has been made to the real PayPal sandbox** (no sandbox account). Judges will likely expect a real sandbox integration. **Highest-priority gap.** |
 | Product & engineering | Strong: deployed, 134-check e2e suite, threat model, audit chain with external anchors, p95 137 ms. | Demo video, screenshots, polished README front page. |
 
@@ -22,7 +22,7 @@
 
 ## Demo video outline (~3 min)
 1. (0:00) Problem: agents can overspend/hallucinate/be prompt-injected at checkout; LLMs are non-deterministic.
-2. (0:20) Say a rule in plain English → Gemini drafts a policy → deterministic readback → human confirms with MFA.
+2. (0:20) Say a rule in plain English → Claude drafts a policy → deterministic readback → human confirms with MFA.
 3. (0:50) Agent calls `validateCart` (ALLOW / REQUIRE_REAUTH / DENY); show a prompt-injection directive compiling to a harmless limit.
 4. (1:30) **Real PayPal sandbox** order → approve → signed webhook → inspect → capture only on ALLOW (needs step 1). Show an over-limit order that is NOT captured.
 5. (2:05) Kill-switch: revoke the policy; the next order is denied. Exception queue: re-trigger a failed capture safely (no double charge).
@@ -34,9 +34,9 @@
 
 **Inspiration.** AI agents are starting to buy things for us, but LLMs hallucinate, get prompt-injected, and see prices change mid-checkout. A payment needs a checker that does not guess.
 
-**What it does.** You describe limits in plain language ("laptop under $1,200, tax + shipping under $150"). Gemini turns that into a strict, machine-checked policy; SentinelPay reads it back in plain English and activates it only after you confirm with a one-time code. Before any payment, an agent calls SentinelPay, which returns ALLOW / REQUIRE_REAUTH / DENY from deterministic code, never from a model. PayPal webhooks are signature-verified, orders are re-inspected, and capture happens only on ALLOW, with idempotency keys so a retry cannot double-charge. Everything lands in a hash-chained audit log anchored hourly to immutable cloud storage. An operator assistant explains decisions using read-only tools and cannot change policy or move money.
+**What it does.** You describe limits in plain language ("laptop under $1,200, tax + shipping under $150"). Claude turns that into a strict, machine-checked policy; SentinelPay reads it back in plain English and activates it only after you confirm with a one-time code. Before any payment, an agent calls SentinelPay, which returns ALLOW / REQUIRE_REAUTH / DENY from deterministic code, never from a model. PayPal webhooks are signature-verified, orders are re-inspected, and capture happens only on ALLOW, with idempotency keys so a retry cannot double-charge. Everything lands in a hash-chained audit log anchored hourly to immutable cloud storage. An operator assistant explains decisions using read-only tools and cannot change policy or move money.
 
-**How we built it.** Next.js 16 on Google Cloud Run; Neon Postgres; Gemini via Vertex AI (structured output, strict Zod validation of every model answer); PayPal Orders v2 + webhooks [PENDING: real sandbox]; OpenAPI tool for Google Agent Studio agents; Secret Manager, Cloud Scheduler, GCS.
+**How we built it.** Next.js 16 on Google Cloud Run; Neon Postgres; Claude via the Anthropic API (structured output, strict Zod validation of every model answer); PayPal Orders v2 + webhooks [PENDING: real sandbox]; OpenAPI tool for Google Agent Studio agents; Secret Manager, Cloud Scheduler, GCS.
 
 **Challenges.** Models drop or invent constraints, so every model output is untrusted and the human reads back exactly what will be enforced. Cutting p95 latency from ~325 ms to 137 ms by removing a global audit lock (group commit) and caching only on the advisory path. Making retries safe when a capture's outcome is unknown.
 
@@ -46,4 +46,4 @@
 
 **What's next.** Real merchant onboarding via Store Sync price baselines, Agent Payments Protocol support, broader rule types, SSO.
 
-**Built with:** TypeScript, Next.js, Google Cloud Run, Vertex AI (Gemini), Neon/Postgres, PayPal REST (Orders v2, Webhooks), Cloud Build, Secret Manager, Cloud Scheduler, Cloud Storage.
+**Built with:** TypeScript, Next.js, Google Cloud Run, Anthropic Claude API, Neon/Postgres, PayPal REST (Orders v2, Webhooks), Cloud Build, Secret Manager, Cloud Scheduler, Cloud Storage.

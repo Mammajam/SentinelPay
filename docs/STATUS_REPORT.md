@@ -101,3 +101,7 @@ The six recommendations from the concept assessment were actioned. A working, te
 Findings: one DB round trip costs ~24 ms (Cloud Run to Neon). The old global lock capped the system; fixes = lock-free **group-commit** audit append (DB-enforced linearity: PK `seq` + UNIQUE `prev_hash`, retry on conflict), and short TTL caches for key auth (10 s), active policies (5 s) and positive merchant bindings (30 s) **on the advisory path only**. Webhook, capture and re-trigger always read fresh; MFA calls never use the auth cache.
 **Caveats**: client-side p50 from the owner's location is ~280 ms (network dominates; `/api/health` alone is ~425 ms with a fresh TLS handshake there). Cold starts (min-instances 0) produced a ~4.3 s outlier: set `MIN_INSTANCES=1` for production. Numbers are one policy, one region, warm instances; re-measure with real traffic shape.
 - **Verified**: unit 46/46; e2e **134/134** twice (incl. 25-way concurrent audit, cache TTL propagation); CI green.
+
+
+## Update 2026-10-20: model provider swapped to Anthropic Claude
+Policy compiler (`src/lib/agent/compiler.ts`, structured output via `output_config.format` + strict Zod) and operator assistant (`src/lib/agent/assistant.ts`, tool-use loop) now use `@anthropic-ai/sdk`; `@google/genai`, Vertex IAM/API and `schema.ts` were removed. Earlier sections describe the Gemini implementation historically. Not yet verified live (needs `ANTHROPIC_API_KEY`).

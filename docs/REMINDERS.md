@@ -12,7 +12,7 @@ See `docs/DEVPOST_DRAFT.md` for the readiness table, video outline and draft tex
 
 ## A. Needs YOU (blocking or time-sensitive)
 - [x] ~~Re-rotate the Neon password~~ (confirmed by owner 2026-10-09; deployed secrets were created from the rotated value).
-- [ ] **Fund Gemini** (AI Studio credits, or set up Vertex with a real GCP *project ID* in `GEAP_PROJECT`). Until then the policy compiler and operator assistant are untested live (HTTP 402/502). Then I re-run the compiler tests incl. prompt-injection red-teaming.
+- [ ] **Set `ANTHROPIC_API_KEY`** in `.env.local` and Secret Manager (`sentinelpay-anthropic-api-key`), then redeploy. The Claude swap (2026-10-20) is tested only with mocks; the compiler and assistant are untested live. Then re-run compiler tests incl. prompt-injection red-teaming and the "never more than 2 units" case.
 - [ ] **Create your first admin key** and add the TOTP secret to an authenticator app: `npm run admin -- key --tenant mytenant --role admin --label "my laptop"` (run it yourself; it prints secrets once). Then sign in at the dashboard.
 - [ ] **Register your real PayPal merchant id** (tenant `mytenant` currently has the placeholder `YOUR_MERCHANT_ID`).
 - [ ] **Send the PayPal inquiry** in `docs/O2_PAYPAL_INQUIRY.md` (token-path question, pre-capture hook, capture-only credentials, webhook verification, Seller Protection, Store Sync). Record the answer in `docs/SPEC_ADDENDUM.md` (closes O2).
@@ -48,11 +48,11 @@ See `docs/DEVPOST_DRAFT.md` for the readiness table, video outline and draft tex
 - [ ] **Production cut-over checklist**: C1–C4 answered, pen test, legal review, O1 enforced (SentinelPay is the only capture path), `PAYPAL_ALLOW_LIVE=1` deliberately.
 ### Product
 - [ ] Policy **compile UI** (currently API-only) and a policy diff view.
-- [ ] Optional **MCP server** transport for Gemini Enterprise (needs OAuth 2.0 + admin toggle).
+- [ ] Optional **MCP server** transport for Gemini Enterprise / Agent Studio (needs OAuth 2.0 + admin toggle).
 - [ ] Optional AG Grid Community swap-in for the tables.
 - [ ] Silence the `MODULE_TYPELESS_PACKAGE_JSON` Node warning (`"type": "module"` needs a compatibility check with Next config files).
 
-- [ ] **Compiler completeness**: the live Vertex compile dropped a stated limit ("never more than 2 units"). Add few-shot examples and/or have the model return `unmapped_constraints` that the readback shows as a warning ("these parts of your request were NOT turned into rules"). Human confirmation catches it today; make it harder to miss.
+- [ ] **Compiler completeness**: the earlier live Gemini compile dropped a stated limit ("never more than 2 units"). Add few-shot examples and/or have the model return `unmapped_constraints` that the readback shows as a warning ("these parts of your request were NOT turned into rules"). Human confirmation catches it today; make it harder to miss.
 - [ ] **Lock the anchor bucket retention** (YOU; irreversible; `deploy/README.md`) and add log-based alerts (webhook.rejected, rate_limited, admin.login_failed spikes, capture_failed, severity>=ERROR).
 - [ ] Separate **prod Neon database/branch** from the dev/e2e one (the deployed service currently shares the dev DB with its test rows).
 - [ ] Custom domain + Cloud Armor in front of the public service (T24).

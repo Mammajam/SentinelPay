@@ -9,7 +9,6 @@ import { buildGcsUpload, mismatchedAnchors, signAnchor, verifyAnchorSignature } 
 import { redact } from "../src/lib/log.ts";
 import { z } from "zod";
 import { Policy } from "../src/lib/policy/schema.ts";
-import { toModelSchema } from "../src/lib/agent/schema.ts";
 import { envMs, TtlCache } from "../src/lib/cache.ts";
 import { buildBatchInsert } from "../src/lib/db/audit.ts";
 import { makeEntry as chainEntry, verifyChain } from "../src/lib/audit/chain.ts";
@@ -195,20 +194,11 @@ test("log redaction hides secrets by key name, at any depth, and bounds size", (
   assert.equal(out.ok, 1);
 });
 
-test("model schema: Vertex-incompatible keywords are removed, structure and required fields are kept", () => {
-  const out = JSON.stringify(toModelSchema(z.toJSONSchema(Policy)));
-  for (const bad of ["$schema", "additionalProperties", "pattern", "format", "minItems", "maxItems", "\"default\"", "\"const\"", "oneOf"]) {
-    assert.equal(out.includes(bad), false, `still contains ${bad}`);
-  }
-  assert.match(out, /"anyOf"/);
-  assert.match(out, /"enum":\["max_total"\]/, "const became a single-value enum");
-  assert.match(out, /"required":\["version","currency","rules"\]/);
-});
-test("loosening the model schema does not loosen validation: Policy still rejects what the schema no longer forbids", () => {
-  assert.equal(Policy.safeParse({ version: 1, currency: "usd", rules: [{ kind: "max_total", amount: 1 }] }).success, false, "currency pattern still enforced by Zod");
-  assert.equal(Policy.safeParse({ version: 1, currency: "USD", rules: [] }).success, false, "min rule count still enforced");
-  assert.equal(Policy.safeParse({ version: 1, currency: "USD", rules: Array.from({ length: 51 }, () => ({ kind: "max_total", amount: 1 })) }).success, false, "max rule count still enforced");
-  assert.equal(Policy.safeParse({ version: 1, currency: "USD", rules: [{ kind: "max_total", amount: 12.5 }] }).success, false, "integer cents still enforced");
+test("Policy stays strict: validation rejects what a model might emit", () => {
+  assert.equal(Policy.safeParse({ version: 1, currency: "usd", rules: [{ kind: "max_total", amount: 1 }] }).success, false, "currency pattern enforced by Zod");
+  assert.equal(Policy.safeParse({ version: 1, currency: "USD", rules: [] }).success, false, "min rule count enforced");
+  assert.equal(Policy.safeParse({ version: 1, currency: "USD", rules: Array.from({ length: 51 }, () => ({ kind: "max_total", amount: 1 })) }).success, false, "max rule count enforced");
+  assert.equal(Policy.safeParse({ version: 1, currency: "USD", rules: [{ kind: "max_total", amount: 12.5 }] }).success, false, "integer cents enforced");
 });
 
 test("TTL cache: hit, expiry, bound, delete, and ttl=0 disables it", async () => {

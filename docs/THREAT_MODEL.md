@@ -5,7 +5,7 @@ Method: STRIDE over the trust boundaries below. Status: **M** = mitigated in cod
 ```
 [Shopper/Admin] --(1)--> [SentinelPay API] <--(2)-- [AI Agent (UNTRUSTED)]
                               |  \
-                              |   (3) Gemini/GEAP compiler (UNTRUSTED output)
+                              |   (3) Claude compiler (UNTRUSTED output)
                               |
                          (4) Neon Postgres        (5) PayPal APIs + Webhooks (semi-trusted, signed)
 ```

@@ -20,6 +20,6 @@ Checked against PayPal developer docs via web research this session. **Verified*
 - **O2** Confirm with PayPal whether any non-merchant party may sit in the token path (ACP/UCP). Until answered, do not design around token interception.
 - **O3** Define how Store Sync baseline prices reach the evaluator (feed ingestion job vs. query). Until then `price_drift` policies correctly DENY (`BASELINE_UNKNOWN`).
 - **O5** Confirm exact Orders v2 / Vault v3 error enum names in sandbox.
-- **O6** "GEAP" interpreted as Google's enterprise agent platform (Vertex/Gemini). If you meant a different product, only `src/lib/agent/geap.ts` changes.
+- **O6** (superseded 2026-10-20) The AI model is now Anthropic Claude; the swap touched only `src/lib/agent/compiler.ts` and `assistant.ts`.
 
 Sources: PayPal ValidationIssue definition (developer.paypal.com/api/agentic-commerce/v1/definitions/validationissue); Agent Ready overview (developer.paypal.com/agent-ready/overview); docs.paypal.ai agentic-commerce pages.

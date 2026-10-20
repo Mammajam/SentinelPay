@@ -35,15 +35,13 @@ gcloud config set project "$PROJECT" >/dev/null
 
 say "Enabling APIs (idempotent)"
 run gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com \
-  secretmanager.googleapis.com aiplatform.googleapis.com storage.googleapis.com cloudscheduler.googleapis.com \
+  secretmanager.googleapis.com storage.googleapis.com cloudscheduler.googleapis.com \
   logging.googleapis.com monitoring.googleapis.com
 
 say "Service account $SA"
 if ! gcloud iam service-accounts describe "$SA" >/dev/null 2>&1; then
   run gcloud iam service-accounts create "$SA_NAME" --display-name "SentinelPay Cloud Run runtime"
 fi
-# Vertex AI (Gemini via the platform; no API key needed on Cloud Run).
-run gcloud projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role roles/aiplatform.user --condition=None >/dev/null
 
 say "Secrets (values never printed)"
 declare -a SECRET_MAP=(
@@ -52,6 +50,7 @@ declare -a SECRET_MAP=(
   "SESSION_SECRET:sentinelpay-session-secret"
   "CRON_SECRET:sentinelpay-cron-secret"
   "ANCHOR_HMAC_KEY:sentinelpay-anchor-hmac-key"
+  "ANTHROPIC_API_KEY:sentinelpay-anthropic-api-key"
 )
 SET_SECRETS=""
 for pair in "${SECRET_MAP[@]}"; do
@@ -88,7 +87,7 @@ run gcloud run deploy "$SERVICE" --source . --region "$REGION" \
   --allow-unauthenticated \
   --service-account "$SA" \
   --min-instances "${MIN_INSTANCES:-0}" --max-instances 5 --memory 512Mi --cpu 1 --concurrency 40 --timeout 30 \
-  --set-env-vars "PAYPAL_BASE_URL=https://api-m.sandbox.paypal.com,GEAP_PROJECT=$PROJECT,GEAP_LOCATION=us-central1,GEAP_MODEL=gemini-2.5-flash,ANCHOR_GCS_BUCKET=$BUCKET" \
+  --set-env-vars "PAYPAL_BASE_URL=https://api-m.sandbox.paypal.com,ANCHOR_GCS_BUCKET=$BUCKET" \
   --set-secrets "$SET_SECRETS"
 
 URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format 'value(status.url)' 2>/dev/null || echo "https://<service-url>")"

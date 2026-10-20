@@ -16,7 +16,7 @@
     "loadtest": "node --env-file=.env.local scripts/loadtest.ts"
   },
   "dependencies": {
-    "@google/genai": "^2.27.0",
+    "@anthropic-ai/sdk": "^0.135.0",
     "@neondatabase/serverless": "^1.2.0",
     "next": "16.4.0",
     "react": "19.3.0",

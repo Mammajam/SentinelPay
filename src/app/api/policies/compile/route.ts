@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { authenticate, denied } from "@/lib/auth/keys.ts";
 import { guard, LIMITS } from "@/lib/ratelimit.ts";
-import { getCompiler } from "@/lib/agent/geap.ts";
+import { getCompiler } from "@/lib/agent/compiler.ts";
 import { policyHash, readback } from "@/lib/policy/readback.ts";
 import { insertDraftPolicy } from "@/lib/db/store.ts";
 import { appendAudit } from "@/lib/db/audit.ts";
