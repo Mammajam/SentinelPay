@@ -10,7 +10,7 @@ Built for the [PayPal AI Hackathon 2026](https://paypalaihackathon.devpost.com/)
 |---|---|
 | Hosted demo | https://sentinelpay-jiwhxjcfia-ul.a.run.app (Google Cloud Run; `GET /api/health`) |
 | Demo video | _[YouTube link: added at submission]_ |
-| Tests | 47 unit tests, 134 end-to-end checks, CI on every push |
+| Tests | 50 unit tests, 134 end-to-end checks, CI on every push |
 
 ## Where PayPal and AI are used
 - **PayPal:** Orders v2 (create / get / capture with `PayPal-Request-Id` idempotency), webhook signature verification (certificate chain, `crc32`, RSA-SHA256), webhook de-duplication, and PayPal error-enum handling. Capture is attempted **only** after the policy returns `ALLOW`, and an ambiguous failure is never blindly retried.
@@ -28,7 +28,7 @@ Built for the [PayPal AI Hackathon 2026](https://paypalaihackathon.devpost.com/)
 5. **Audit**: everything is appended to a **hash-chained, append-only log**, anchored hourly to external storage.
 6. **Kill-switch**: `POST /api/policies/revoke` (admin + TOTP); the next validation is denied immediately.
 
-Dashboard (session-gated, tenant-scoped): **Decisions**, **Policies** (readback, hash, confirm/revoke), **Exceptions** (failed captures; safe re-trigger that cannot double-capture).
+Dashboard (session-gated, tenant-scoped, built with [AG Grid Community](https://www.ag-grid.com/), MIT): **Decisions** (sort, filter, pagination, red rows for price/integrity violations, a Live mode that merges new decisions every 5 s, CSV export hardened against spreadsheet-formula injection), **Policies** (readback, hash, confirm/revoke), **Exceptions** (failed captures; safe re-trigger that cannot double-capture).
 
 ## For judges: try it
 
@@ -63,7 +63,7 @@ Edit `.env.local`:
 Then:
 ```bash
 npm run db:migrate            # create tables, triggers
-npm test                      # 47 unit tests, no database needed
+npm test                      # 50 unit tests, no database needed
 npm run e2e:sim               # 134 end-to-end checks: boots a local PayPal simulator + the app against your DB
 ```
 `npm run e2e:sim` is the quickest proof that everything works: forged, stale and replayed webhooks, over-limit carts, double-capture attempts, ambiguous 5xx, tenant isolation, MFA replay, and audit-chain integrity. It needs no PayPal credentials.
@@ -101,3 +101,6 @@ Note: this Next.js version has `cacheComponents` enabled. Route segment `runtime
 
 ## More
 [`docs/STATUS_REPORT.md`](docs/STATUS_REPORT.md) · [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) · [`docs/SPEC_ADDENDUM.md`](docs/SPEC_ADDENDUM.md) · [`docs/COMPLIANCE_SCOPING.md`](docs/COMPLIANCE_SCOPING.md) · [`docs/REMINDERS.md`](docs/REMINDERS.md) · [`SECURITY.md`](SECURITY.md)
+
+## Third-party software
+AG Grid Community and `ag-grid-react` (MIT) for the dashboard grids; see `package.json` for the full dependency list. SentinelPay itself is Apache-2.0.

@@ -7,7 +7,8 @@ See `docs/DEVPOST_DRAFT.md` for the readiness table, video outline and draft tex
 - [ ] **Read the Devpost Rules/Overview** (https://paypalaihackathon.devpost.com/): required fields, video length, repo/open-source rule, testing instructions, eligibility, deadline time zone, sponsor-prize rules.
 - [ ] **REAL PayPal sandbox integration (top gap).** All PayPal behaviour so far was tested against my local simulator. Ask the hackathon organisers / PayPal developer support how to obtain sandbox credentials from Liberia, or borrow a teammate's sandbox app. Then run the flow + `e2e:sim` runner against the real sandbox and record it.
 - [ ] Demo video (host publicly), screenshots, architecture diagram, judge access (throwaway demo tenant; never real secrets).
-- [ ] Optional prize levers: AG Grid sponsor prize (check rules; swap tables to AG Grid Community), compiler-completeness fix.
+- [x] ~~AG Grid integration~~ (2026-10-20: AG Grid Community on Decisions + Exceptions; verified in a browser). [ ] **Read the AG Grid sponsor-prize rules on Devpost** (does Community qualify?) and mention the grid in the submission.
+- [x] ~~Compiler completeness~~ (verified live 2026-10-20: the stated "never more than 2 units" limit is now captured).
 - [ ] Submit at least 48 h before the deadline.
 
 ## A. Needs YOU (blocking or time-sensitive)
@@ -22,7 +23,7 @@ See `docs/DEVPOST_DRAFT.md` for the readiness table, video outline and draft tex
 - [ ] **Decide:** evaluate PayPal's Agent Toolkit / MCP server as the "actions" side with SentinelPay as the guardrail (I have not opened that repo, per your instruction).
 - [x] ~~Deploy to an HTTPS host~~ (Cloud Run). [ ] Now: import `/api/agent/openapi` into Google Agent Studio and test with a real agent. Labels in the console may differ from `docs/AGENT_STUDIO.md`.
 - [ ] **Answer the compliance questions** C1–C6 in `docs/COMPLIANCE_SCOPING.md` with counsel/PayPal before any production traffic.
-- [ ] (Optional) Confirm Apache-2.0 licence; decide whether AG Grid Community should replace the plain tables (no Enterprise licence).
+- [ ] (Optional) Confirm the Apache-2.0 licence. (AG Grid Community is integrated; no Enterprise licence needed.)
 - [ ] (Info) GitHub's **Agents tab** is Copilot coding agent (paid Copilot plan); nothing in this project depends on it.
 
 ## B. Needs ME (engineering backlog, roughly by priority)
@@ -49,10 +50,10 @@ See `docs/DEVPOST_DRAFT.md` for the readiness table, video outline and draft tex
 ### Product
 - [ ] Policy **compile UI** (currently API-only) and a policy diff view.
 - [ ] Optional **MCP server** transport for Gemini Enterprise / Agent Studio (needs OAuth 2.0 + admin toggle).
-- [ ] Optional AG Grid Community swap-in for the tables.
+- [x] ~~AG Grid Community swap-in for the tables~~ (Decisions + Exceptions; Policies stays as cards on purpose so the readback reads well).
 - [ ] Silence the `MODULE_TYPELESS_PACKAGE_JSON` Node warning (`"type": "module"` needs a compatibility check with Next config files).
 
-- [ ] **Compiler completeness**: the earlier live Gemini compile dropped a stated limit ("never more than 2 units"). Add few-shot examples and/or have the model return `unmapped_constraints` that the readback shows as a warning ("these parts of your request were NOT turned into rules"). Human confirmation catches it today; make it harder to miss.
+- [x] ~~Compiler completeness~~ resolved and verified live on 2026-10-20 (prompt now requires every stated limit to become a rule). Optional hardening: have the model also return `unmapped_constraints` and show them as a warning in the readback.
 - [ ] **Lock the anchor bucket retention** (YOU; irreversible; `deploy/README.md`) and add log-based alerts (webhook.rejected, rate_limited, admin.login_failed spikes, capture_failed, severity>=ERROR).
 - [ ] Separate **prod Neon database/branch** from the dev/e2e one (the deployed service currently shares the dev DB with its test rows).
 - [ ] Custom domain + Cloud Armor in front of the public service (T24).

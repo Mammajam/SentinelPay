@@ -7,7 +7,8 @@
 ## Honest readiness vs. "meaningfully use PayPal and AI"
 | Area | State | Gap |
 |---|---|---|
-| **AI** | **Strong.** Claude compiles natural-language spending rules into validated policies; an operator assistant answers questions with read-only/dry-run tools and refuses to move money; an OpenAPI tool lets an external agent (Google Agent Studio) call the guardrail. Deployed on Cloud Run; **live Claude calls not yet verified after the Gemini→Claude swap**. | Agent Studio import not tested in a real Agent Studio project. |
+| **AI** | **Strong, verified live on production (2026-10-20).** Claude (`claude-sonnet-5-5`) compiles natural-language spending rules into validated policies; a prompt-injection directive compiled to a harmless `$0` limit; a "never more than 2 units" limit that an earlier model dropped is now captured as a rule. An operator assistant answers with read-only/dry-run tools and **refuses** to activate policies or move money. An OpenAPI tool lets an external agent (Google Agent Studio) call the guardrail. | Agent Studio import not tested in a real Agent Studio project. |
+| **Dashboard** | **AG Grid Community (MIT)** powers the Decisions and Exceptions views: sorting, column filters, pagination, red rows for price/integrity violations (light + dark theme), a Live mode that merges new decisions every 5 s, and CSV export hardened against spreadsheet-formula injection. Verified visually in a browser. | AG Grid sponsor-prize rules not yet read (Community vs Enterprise eligibility unknown). |
 | **PayPal** | **Weak spot.** Implements Orders v2 capture with idempotency, webhook signature verification, agentic-commerce error handling, merchant binding. Verified against a **local simulator I wrote from PayPal's docs**, not against PayPal. | **No call has been made to the real PayPal sandbox** (no sandbox account). Judges will likely expect a real sandbox integration. **Highest-priority gap.** |
 | Product & engineering | Strong: deployed, 134-check e2e suite, threat model, audit chain with external anchors, p95 137 ms. | Demo video, screenshots, polished README front page. |
 
@@ -18,14 +19,14 @@
 4. **Devpost text, images, "Built with", links** (draft below), architecture diagram, 3-5 screenshots (dashboard red rows, policy readback, exception queue, assistant answer, anchor in GCS).
 5. **Judge access**: a test tenant + admin key + authenticator secret, or a recorded walkthrough, since the dashboard is login-gated. Do NOT put real secrets in the Devpost text; use a throwaway demo tenant.
 6. Operational hygiene before the public window: lock the anchor bucket, separate the prod database from dev/e2e data, `MIN_INSTANCES=1`, re-run `npm test` + `npm run e2e:sim`, confirm CI green on `main`, README up to date.
-7. Optional prize levers: AG Grid sponsor prize (replace the plain tables with AG Grid Community if the sponsor rules allow); compiler completeness fix (a stated limit was dropped in one live test).
+7. **AG Grid sponsor prize:** AG Grid Community is now integrated (see above). **Read the sponsor's rules on Devpost** to confirm Community qualifies, and mention the grid features explicitly in the submission. (The compiler-completeness issue is resolved and verified live; see the AI row.)
 
 ## Demo video outline (~3 min)
 1. (0:00) Problem: agents can overspend/hallucinate/be prompt-injected at checkout; LLMs are non-deterministic.
 2. (0:20) Say a rule in plain English → Claude drafts a policy → deterministic readback → human confirms with MFA.
 3. (0:50) Agent calls `validateCart` (ALLOW / REQUIRE_REAUTH / DENY); show a prompt-injection directive compiling to a harmless limit.
 4. (1:30) **Real PayPal sandbox** order → approve → signed webhook → inspect → capture only on ALLOW (needs step 1). Show an over-limit order that is NOT captured.
-5. (2:05) Kill-switch: revoke the policy; the next order is denied. Exception queue: re-trigger a failed capture safely (no double charge).
+5. (2:05) Kill-switch: revoke the policy; the next order is denied. Dashboard (AG Grid): red rows for price/integrity violations, Live mode, CSV export; exception queue: re-trigger a failed capture safely (no double charge).
 6. (2:30) Operator assistant: tool-grounded answers; it refuses to activate/capture. Tamper-evident audit chain + external anchors.
 7. (2:50) Architecture + what's next.
 
@@ -36,9 +37,9 @@
 
 **What it does.** You describe limits in plain language ("laptop under $1,200, tax + shipping under $150"). Claude turns that into a strict, machine-checked policy; SentinelPay reads it back in plain English and activates it only after you confirm with a one-time code. Before any payment, an agent calls SentinelPay, which returns ALLOW / REQUIRE_REAUTH / DENY from deterministic code, never from a model. PayPal webhooks are signature-verified, orders are re-inspected, and capture happens only on ALLOW, with idempotency keys so a retry cannot double-charge. Everything lands in a hash-chained audit log anchored hourly to immutable cloud storage. An operator assistant explains decisions using read-only tools and cannot change policy or move money.
 
-**How we built it.** Next.js 16 on Google Cloud Run; Neon Postgres; Claude via the Anthropic API (structured output, strict Zod validation of every model answer); PayPal Orders v2 + webhooks [PENDING: real sandbox]; OpenAPI tool for Google Agent Studio agents; Secret Manager, Cloud Scheduler, GCS.
+**How we built it.** Next.js 16 on Google Cloud Run; Neon Postgres; Claude via the Anthropic API (structured output, strict Zod validation of every model answer); PayPal Orders v2 + webhooks [PENDING: real sandbox]; AG Grid Community for the operator dashboard; OpenAPI tool for Google Agent Studio agents; Secret Manager, Cloud Scheduler, GCS.
 
-**Challenges.** Models drop or invent constraints, so every model output is untrusted and the human reads back exactly what will be enforced. Cutting p95 latency from ~325 ms to 137 ms by removing a global audit lock (group commit) and caching only on the advisory path. Making retries safe when a capture's outcome is unknown.
+**Challenges.** Models drop or invent constraints, so every model output is untrusted and the human reads back exactly what will be enforced. A model that silently dropped a stated limit (fixed by a stricter prompt and caught by the human readback). Cutting p95 latency from ~325 ms to 137 ms by removing a global audit lock (group commit) and caching only on the advisory path. Making retries safe when a capture's outcome is unknown.
 
 **Accomplishments.** Fail-closed by design; 134 end-to-end checks including forged/replayed webhooks, cross-tenant attacks, MFA replay and concurrency; load-tested at 76 req/s; tamper-evident audit.
 
@@ -46,4 +47,4 @@
 
 **What's next.** Real merchant onboarding via Store Sync price baselines, Agent Payments Protocol support, broader rule types, SSO.
 
-**Built with:** TypeScript, Next.js, Google Cloud Run, Anthropic Claude API, Neon/Postgres, PayPal REST (Orders v2, Webhooks), Cloud Build, Secret Manager, Cloud Scheduler, Cloud Storage.
+**Built with:** TypeScript, Next.js, AG Grid Community, Google Cloud Run, Anthropic Claude API, Neon/Postgres, PayPal REST (Orders v2, Webhooks), Cloud Build, Secret Manager, Cloud Scheduler, Cloud Storage.

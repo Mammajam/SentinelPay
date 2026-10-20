@@ -7,7 +7,6 @@ import { readSession, signSession, SESSION_TTL_SEC } from "../src/lib/auth/sessi
 import { generateKey, hashKey } from "../src/lib/auth/keys.ts";
 import { buildGcsUpload, mismatchedAnchors, signAnchor, verifyAnchorSignature } from "../src/lib/audit/anchor.ts";
 import { redact } from "../src/lib/log.ts";
-import { z } from "zod";
 import { Policy } from "../src/lib/policy/schema.ts";
 import { envMs, TtlCache } from "../src/lib/cache.ts";
 import { buildBatchInsert } from "../src/lib/db/audit.ts";

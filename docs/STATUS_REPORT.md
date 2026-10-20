@@ -1,4 +1,17 @@
-# SentinelPay Status Report — 2026-10-06
+# SentinelPay Status Report
+
+> **How to read this file.** It is a dated log. Entries before **2026-10-20** describe the original **Gemini/Vertex AI** implementation and are kept as a historical record: that provider was **replaced by Anthropic Claude on 2026-10-20** (see that entry). The authoritative current state is the "Current state" block below and the final entries. Open tasks live in `docs/REMINDERS.md`.
+
+## Current state (2026-10-20)
+- **Live**: Cloud Run `sentinelpay` (us-east5), revision serving 100%, secrets in Secret Manager, hourly GCS audit anchors (291+ verified), `/api/health` + `/api/ready` green.
+- **AI provider**: Anthropic Claude (`claude-sonnet-5-5`) for the policy compiler and operator assistant. **Verified live**: correct compilation, prompt-injection resistance (harmless `$0`), previously dropped limits now captured, assistant refuses write requests.
+- **Dashboard**: AG Grid Community (Decisions, Exceptions) + policy cards; Live mode, CSV export (formula-injection safe), red violation rows, dark/light theme.
+- **Tests**: 50 unit, 134 end-to-end, CI green; `npm audit --omit=dev`: 0 vulnerabilities.
+- **Biggest gap**: no call has ever been made to the **real PayPal sandbox** (simulator only). See `docs/DEVPOST_DRAFT.md` and `docs/REMINDERS.md`.
+
+---
+
+_Original report, 2026-10-06 (historical):_
 
 ## Summary
 The six recommendations from the concept assessment were actioned. A working, tested, type-checked, building Next.js vertical slice exists. **Not production-ready**: nothing has run against a live Neon database, PayPal sandbox, or Gemini/GEAP yet (no credentials in this environment), and capture initiation is not implemented.
@@ -105,3 +118,11 @@ Findings: one DB round trip costs ~24 ms (Cloud Run to Neon). The old global loc
 
 ## Update 2026-10-20: model provider swapped to Anthropic Claude
 Policy compiler (`src/lib/agent/compiler.ts`, structured output via `output_config.format` + strict Zod) and operator assistant (`src/lib/agent/assistant.ts`, tool-use loop) now use `@anthropic-ai/sdk`; `@google/genai`, Vertex IAM/API and `schema.ts` were removed. Earlier sections describe the Gemini implementation historically. Not yet verified live (needs `ANTHROPIC_API_KEY`).
+
+---
+## Update 2026-10-20 (2) — AG Grid dashboard, live verification of Claude
+- **AG Grid Community 36.2.0 (MIT) integrated** (`src/app/data-grid.tsx`, `src/app/dashboard-client.tsx`, pure helpers in `src/lib/ui/rows.ts`): sortable/filterable/paginated grids for Decisions and Exceptions; red rows for price/integrity violations (light + dark); **Live** mode polls every 5 s and merges by id (keeps sort/filter/page); **CSV export** neutralises agent-controlled values that start with `= + - @` (spreadsheet formula injection); the re-trigger action opens a secure key + one-time-code panel under the grid. Policies stay as cards on purpose (the readback must read well). The grid loads client-only (no server render) to avoid a light-theme flash.
+- **Verified in a real browser** against a seeded throwaway tenant: sorting/filters/pagination (37 rows, 25 per page), DENY filter, red rows with readable text, **real CSV export captured and checked** (hostile `=HYPERLINK(...)` cart id exported as `'=HYPERLINK(...)`), Live arrival of an externally inserted decision (appeared within one poll, highlighted, page preserved), Exceptions grid with the UNKNOWN-outcome row highlighted and the secure panel.
+- **Live Claude verification on production**: laptop directive compiled correctly; injection directive produced `max_total = $0`; phone directive now includes `max_quantity 2` (previously dropped by the Gemini model); assistant refused to activate/capture. Stored drafts record `claude:claude-sonnet-5-5`.
+- **Tests**: unit 50/50 (new `tests/ui.test.ts`), e2e 134/134, lint/typecheck/build clean, `npm audit --omit=dev` 0 vulnerabilities.
+- **Not done / open**: real PayPal sandbox integration; AG Grid sponsor-prize eligibility (rules not read); demo video and Devpost submission; items in `docs/REMINDERS.md`.

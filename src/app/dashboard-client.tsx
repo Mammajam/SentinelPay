@@ -1,20 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { AgGridReact } from "ag-grid-react";
+import type { ColDef, ICellRendererParams, RowClassRules } from "ag-grid-community";
+import dynamic from "next/dynamic";
+
+// Client-only: AG Grid has no meaningful server render, and skipping it avoids a light-themed flash before hydration.
+const DataGrid = dynamic(() => import("./data-grid.tsx"), {
+  ssr: false,
+  loading: () => <p className="py-6 text-sm text-neutral-500">Loading grid…</p>,
+}) as typeof import("./data-grid.tsx").default;
+import { csvSafe, isHotRow, mergeById } from "@/lib/ui/rows.ts";
 
 /* ---------- types mirrored from the read-only JSON APIs ---------- */
 interface Violation { rule: string; code: string; message: string }
 interface Decision { id: number; policyId: string; cartId: string; decision: "ALLOW" | "REQUIRE_REAUTH" | "DENY"; violations: Violation[]; at: string }
 interface PolicyView { id: string; status: "draft" | "active" | "revoked"; hash: string; directive: string; rules: string[]; createdAt: string }
 interface ExceptionView { orderId: string; policyId: string; issue: string | null; ambiguous: boolean; actionType: string; attempt: number; at: string }
-
-const tone: Record<string, string> = {
-  ALLOW: "text-emerald-700 bg-emerald-50",
-  REQUIRE_REAUTH: "text-amber-700 bg-amber-50",
-  DENY: "text-red-700 bg-red-50",
-};
-// Price surprises and integrity failures get a red row: these are the ones an operator must look at.
-const RED = new Set(["PRICE_DRIFT", "BASELINE_UNKNOWN", "TOTAL_DOES_NOT_RECONCILE", "MERCHANT_NOT_REGISTERED", "MERCHANT_NOT_ALLOWED", "CURRENCY_MISMATCH"]);
 
 async function getJson<T>(url: string): Promise<T> {
   const r = await fetch(url);
@@ -52,16 +54,38 @@ function SecureAction({ label, busy, onSubmit, onCancel }: { label: string; busy
 }
 
 /* ---------------------------- Decisions ---------------------------- */
-function DecisionRows({ filter }: { filter: string }) {
+// Defined once (stable references) so the grid does not rebuild its columns on every render.
+const decisionCols: ColDef<Decision>[] = [
+  { field: "id", headerName: "#", maxWidth: 110, sort: "desc", filter: "agNumberColumnFilter" },
+  { field: "cartId", headerName: "Cart", minWidth: 150 },
+  { field: "decision", headerName: "Decision", maxWidth: 200, cellRenderer: (p: ICellRendererParams<Decision>) => <span className={`sp-badge sp-badge-${p.value}`}>{p.value}</span> },
+  { headerName: "Violations", flex: 2, minWidth: 220, valueGetter: (p) => p.data?.violations.map((v) => v.code).join(", ") || "—" },
+  { field: "at", headerName: "When", minWidth: 190, valueFormatter: (p) => new Date(p.value).toLocaleString(), comparator: (a, b) => Date.parse(a) - Date.parse(b) },
+];
+const decisionRowRules: RowClassRules<Decision> = { "sp-row-hot": (p) => isHotRow(p.data?.violations) };
+
+function DecisionRows({ filter, live }: { filter: string; live: boolean }) {
   const qs = new URLSearchParams({ limit: "25", ...(filter ? { decision: filter } : {}) });
-  const first = useApi<{ rows: Decision[]; nextBefore: number | null }>(`/api/admin/validations?${qs}`);
+  const firstUrl = `/api/admin/validations?${qs}`;
+  const first = useApi<{ rows: Decision[]; nextBefore: number | null }>(firstUrl);
   const [more, setMore] = useState<Decision[]>([]);
+  const [fresh, setFresh] = useState<Decision[]>([]); // newest page, refreshed by live polling
   const [next, setNext] = useState<number | null | undefined>(undefined); // undefined => use the first page's cursor
   const [err, setErr] = useState<string | null>(null);
+  const gridRef = useRef<AgGridReact<Decision>>(null);
   const cursor = next === undefined ? (first.data?.nextBefore ?? null) : next;
-  const rows = [...(first.data?.rows ?? []), ...more];
+  const rows = useMemo(() => mergeById([...(first.data?.rows ?? []), ...more, ...fresh]), [first.data, more, fresh]);
 
-  async function loadMore() {
+  // Live mode: poll the newest page and MERGE (ids de-duplicated), so the operator keeps their sort, filter and page.
+  useEffect(() => {
+    if (!live) return;
+    const t = setInterval(() => {
+      getJson<{ rows: Decision[] }>(firstUrl).then((d) => setFresh(d.rows), () => { /* transient: next tick retries */ });
+    }, 5000);
+    return () => clearInterval(t);
+  }, [live, firstUrl]);
+
+  async function loadOlder() {
     if (!cursor) return;
     try {
       const q = new URLSearchParams({ limit: "25", before: String(cursor), ...(filter ? { decision: filter } : {}) });
@@ -71,28 +95,30 @@ function DecisionRows({ filter }: { filter: string }) {
     } catch (e) { setErr((e as Error).message); }
   }
 
+  const exportCsv = () =>
+    gridRef.current?.api.exportDataAsCsv({
+      fileName: "sentinelpay-decisions.csv",
+      // Cart ids/SKUs are agent-controlled: neutralise spreadsheet formulas (=, +, -, @) in the exported file.
+      processCellCallback: (p) => csvSafe(p.formatValue ? p.formatValue(p.value) : p.value),
+    });
+
   const error = err ?? first.error ?? null;
   return (
     <>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-      <table className="w-full text-sm [&_td]:px-2 [&_td]:py-1.5 [&_th]:px-2 [&_th]:py-1">
-        <thead><tr className="text-left text-neutral-500"><th>#</th><th>Cart</th><th>Decision</th><th>Violations</th><th>When</th></tr></thead>
-        <tbody>
-          {rows.map((r) => {
-            const hot = r.violations.some((v) => RED.has(v.code));
-            return (
-              <tr key={r.id} className={`border-t ${hot ? "bg-red-50 text-neutral-900 dark:bg-red-950 dark:text-red-100" : ""}`} data-hot={hot}>
-                <td>{r.id}</td><td>{r.cartId}</td>
-                <td><span className={`rounded px-2 py-0.5 ${tone[r.decision]}`}>{r.decision}</span></td>
-                <td className={hot ? "font-medium text-red-700 dark:text-red-300" : ""}>{r.violations.map((v) => v.code).join(", ") || "—"}</td>
-                <td>{new Date(r.at).toLocaleString()}</td>
-              </tr>
-            );
-          })}
-          {rows.length === 0 && !error && <tr><td colSpan={5} className="py-6 text-neutral-500">{first.data ? `No decisions${filter ? ` with ${filter}` : ""} yet.` : "Loading…"}</td></tr>}
-        </tbody>
-      </table>
-      {cursor && <button className="mt-3 rounded border px-3 py-1 text-sm" onClick={loadMore}>Load more</button>}
+      <DataGrid<Decision>
+        gridRef={gridRef}
+        rows={rows}
+        columns={decisionCols}
+        getRowId={(p) => String(p.data.id)}
+        rowClassRules={decisionRowRules}
+        loading={!first.data && !error}
+        emptyText={`No decisions${filter ? ` with ${filter}` : ""} yet.`}
+      />
+      <div className="mt-3 flex gap-2">
+        {cursor && <button className="rounded border px-3 py-1 text-sm" onClick={loadOlder}>Load older</button>}
+        <button className="rounded border px-3 py-1 text-sm" onClick={exportCsv} disabled={rows.length === 0}>Export CSV</button>
+      </div>
     </>
   );
 }
@@ -100,17 +126,19 @@ function DecisionRows({ filter }: { filter: string }) {
 function DecisionsTab() {
   const [filter, setFilter] = useState("");
   const [tick, setTick] = useState(0);
+  const [live, setLive] = useState(false);
   return (
     <section>
-      <div className="mb-2 flex items-center gap-2 text-sm">
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
         <label htmlFor="df">Decision</label>
         <select id="df" className="rounded border px-2 py-1" value={filter} onChange={(e) => setFilter(e.target.value)}>
           <option value="">All</option><option>ALLOW</option><option>REQUIRE_REAUTH</option><option>DENY</option>
         </select>
+        <label className="ml-2 flex items-center gap-1"><input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} /> Live (every 5 s)</label>
         <button className="ml-auto rounded border px-2 py-1" onClick={() => setTick((t) => t + 1)}>Refresh</button>
       </div>
       {/* keyed: changing the filter or refreshing resets pagination state cleanly */}
-      <DecisionRows key={`${filter}-${tick}`} filter={filter} />
+      <DecisionRows key={`${filter}-${tick}`} filter={filter} live={live} />
     </section>
   );
 }
@@ -169,15 +197,29 @@ function PoliciesTab() {
 }
 
 /* ---------------------------- Exceptions ---------------------------- */
+const exceptionRowRules: RowClassRules<ExceptionView> = { "sp-row-hot": (p) => Boolean(p.data?.ambiguous) };
+
 function ExceptionsTab() {
   const [tick, setTick] = useState(0);
   const res = useApi<{ exceptions: ExceptionView[] }>("/api/admin/exceptions", tick);
-  const items = res.data?.exceptions ?? [];
+  const items = useMemo(() => res.data?.exceptions ?? [], [res.data]);
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const msg = note ?? res.error ?? null;
   const setMsg = setNote;
+  const selected = items.find((i) => i.orderId === open);
+
+  const cols = useMemo<ColDef<ExceptionView>[]>(() => [
+    { field: "orderId", headerName: "Order", minWidth: 170, cellClass: "font-mono" },
+    { headerName: "Issue", minWidth: 200, valueGetter: (p) => `${p.data?.issue ?? "—"} (${p.data?.actionType ?? ""})` },
+    { headerName: "Outcome known?", minWidth: 200, valueGetter: (p) => (p.data?.ambiguous ? "UNKNOWN — reconcile first" : "Definitely failed") },
+    { field: "attempt", headerName: "Attempt", maxWidth: 120, filter: "agNumberColumnFilter" },
+    { field: "at", headerName: "When", minWidth: 190, valueFormatter: (p) => new Date(p.value).toLocaleString(), comparator: (a, b) => Date.parse(a) - Date.parse(b) },
+    { headerName: "", colId: "action", sortable: false, filter: false, maxWidth: 150, cellRenderer: (p: ICellRendererParams<ExceptionView>) => (
+      <button className="rounded border px-2 text-xs" onClick={() => setOpen(p.data?.orderId ?? null)}>Re-trigger…</button>
+    ) },
+  ], []);
 
   async function retrigger(x: ExceptionView, key: string, totp: string) {
     setBusy(true); setMsg(null);
@@ -191,28 +233,26 @@ function ExceptionsTab() {
 
   return (
     <section>
-      <p className="mb-2 text-xs text-neutral-600">Captures that failed and have not since succeeded. Re-triggering asks PayPal for the order&apos;s current state, re-checks your policy, and never double-charges.</p>
+      <div className="mb-2 flex items-center gap-2">
+        <p className="text-xs text-neutral-600">Captures that failed and have not since succeeded. Re-triggering asks PayPal for the order&apos;s current state, re-checks your policy, and never double-charges. Highlighted rows have an UNKNOWN outcome: reconcile before retrying.</p>
+        <button className="ml-auto rounded border px-2 py-1 text-sm" onClick={() => setTick((t) => t + 1)}>Refresh</button>
+      </div>
       {msg && <p role="status" className="mb-2 text-sm">{msg}</p>}
-      <table className="w-full text-sm [&_td]:px-2 [&_td]:py-1.5 [&_th]:px-2 [&_th]:py-1">
-        <thead><tr className="text-left text-neutral-500"><th>Order</th><th>Issue</th><th>Outcome known?</th><th>Attempt</th><th>When</th><th /></tr></thead>
-        <tbody>
-          {items.map((x) => (
-            <tr key={x.orderId} className="border-t align-top">
-              <td className="font-mono text-xs">{x.orderId}</td>
-              <td>{x.issue ?? "—"} <span className="text-xs text-neutral-500">({x.actionType})</span></td>
-              <td>{x.ambiguous ? <span className="rounded bg-amber-50 px-2 py-0.5 text-amber-700">UNKNOWN — reconcile first</span> : "Definitely failed"}</td>
-              <td>{x.attempt}</td>
-              <td>{new Date(x.at).toLocaleString()}</td>
-              <td>
-                {open === x.orderId
-                  ? <SecureAction label="Re-trigger capture" busy={busy} onSubmit={(k, t) => retrigger(x, k, t)} onCancel={() => setOpen(null)} />
-                  : <button className="rounded border px-2 py-1 text-xs" onClick={() => setOpen(x.orderId)}>Re-trigger…</button>}
-              </td>
-            </tr>
-          ))}
-          {items.length === 0 && <tr><td colSpan={6} className="py-6 text-neutral-500">{res.data ? "No open capture failures." : res.error ? "Could not load." : "Loading…"}</td></tr>}
-        </tbody>
-      </table>
+      <DataGrid<ExceptionView>
+        rows={items}
+        columns={cols}
+        getRowId={(p) => p.data.orderId}
+        rowClassRules={exceptionRowRules}
+        loading={!res.data && !res.error}
+        emptyText="No open capture failures."
+        pageSize={10}
+      />
+      {selected && (
+        <div className="mt-3 rounded border p-3 text-sm">
+          <p>Re-trigger capture for <span className="font-mono">{selected.orderId}</span> (attempt {selected.attempt}{selected.ambiguous ? ", outcome unknown: the same idempotency key is reused" : ""})</p>
+          <SecureAction label="Re-trigger capture" busy={busy} onSubmit={(k, t) => retrigger(selected, k, t)} onCancel={() => setOpen(null)} />
+        </div>
+      )}
     </section>
   );
 }
