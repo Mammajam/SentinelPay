@@ -186,3 +186,50 @@ export async function openCaptureFailures(tenantId: string, limit = 50) {
   );
   return rows as Array<{ orderId: string; policyId: string; issue: string | null; ambiguous: boolean; actionType: string; at: string; attempt: number }>;
 }
+
+/* ---------------- Phase 7 dashboard views (always tenant-scoped) ---------------- */
+
+/**
+ * A tenant's audit entries, newest first. A tenant's entries are those tagged with its tenantId OR with the id of
+ * one of ITS policies (order.* and capture.* events carry only policyId). Chain-level and unauthenticated events are
+ * excluded. Returns the internal `seq` ONLY for building a sealed cursor: it must never be sent to the client.
+ */
+export async function auditPage(tenantId: string, o: { limit: number; beforeSeq?: number; kind?: string }) {
+  const { rows } = await db().query(
+    `SELECT seq::int AS seq, prev_hash AS "prevHash", hash, kind, payload, at
+       FROM audit_log
+      WHERE (payload->>'tenantId' = $1 OR payload->>'policyId' = ANY(ARRAY(SELECT id::text FROM policies WHERE owner_id = $1)))
+        AND kind NOT IN ('audit.anchored','webhook.rejected','webhook.received','admin.login_failed')
+        AND ($2::bigint IS NULL OR seq < $2)
+        AND ($3::text IS NULL OR kind = $3)
+      ORDER BY seq DESC LIMIT $4`,
+    [tenantId, o.beforeSeq ?? null, o.kind ?? null, o.limit],
+  );
+  return rows as Array<{ seq: number; prevHash: string; hash: string; kind: string; payload: unknown; at: string }>;
+}
+
+/** Captured payments SentinelPay recorded for this tenant, newest first (keyset on id). Amounts are integer minor units. */
+export async function ledgerPage(tenantId: string, o: { limit: number; before?: number }) {
+  const { rows } = await db().query(
+    `SELECT l.id::int AS id, l.policy_id AS "policyId", l.capture_id AS "captureId", l.amount::text AS amount, l.currency, l.at
+       FROM spend_ledger l JOIN policies p ON p.id = l.policy_id
+      WHERE p.owner_id = $1 AND ($2::bigint IS NULL OR l.id < $2)
+      ORDER BY l.id DESC LIMIT $3`,
+    [tenantId, o.before ?? null, o.limit],
+  );
+  return rows.map((r) => ({ ...r, amount: Number(r.amount) })) as Array<{ id: number; policyId: string; captureId: string; amount: number; currency: string; at: string }>;
+}
+
+export async function ledgerSummary(tenantId: string) {
+  const { rows } = await db().query(
+    `SELECT l.currency, count(*)::int AS n, COALESCE(sum(l.amount),0)::text AS total
+       FROM spend_ledger l JOIN policies p ON p.id = l.policy_id WHERE p.owner_id = $1 GROUP BY l.currency ORDER BY l.currency`,
+    [tenantId],
+  );
+  return rows.map((r) => ({ currency: r.currency as string, count: r.n as number, total: Number(r.total) }));
+}
+
+export async function listMerchants(tenantId: string) {
+  const { rows } = await db().query('SELECT merchant_id AS "merchantId" FROM tenant_merchants WHERE tenant_id = $1 ORDER BY merchant_id', [tenantId]);
+  return rows as Array<{ merchantId: string }>;
+}

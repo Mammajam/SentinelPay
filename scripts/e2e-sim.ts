@@ -474,6 +474,62 @@ async function run() {
   const seqs = (await db().query("select seq::int s from audit_log order by seq")).rows.map((r: { s: number }) => r.s);
   check("audit sequence is gap-free and strictly increasing", seqs.every((v: number, i: number) => v === i + 1));
 
+  section("S30 Audit explorer API: tenant-scoped, no global seq, opaque tenant-bound cursor, per-entry integrity");
+  const adminDashB = await createApiKey({ tenantId: TB, role: "admin", label: "e2e dashboard B" });
+  const lb = await api("/api/admin/login", null, { key: adminDashB.key, totp: code(adminDashB.totpSecret!) }, { "x-forwarded-for": `10.8.8.${Math.floor(Math.random() * 200)}` });
+  const bcookie = (lb.headers.get("set-cookie") ?? "").split(";")[0];
+  check("tenant B dashboard login ok", lb.status === 200, lb.status);
+  check("audit: no cookie => 401, Bearer admin alone => 401", (await dget("/api/admin/audit", null)).status === 401 && (await fetch(`${APP}/api/admin/audit`, { headers: { authorization: `Bearer ${adminA.key}` } })).status === 401);
+  type AuditResp = { rows: Array<{ id: string; kind: string; at: string; hash12: string; summary: string; tone: string; payload: string; selfHashOk: boolean }>; nextCursor: string | null };
+  const aAudit = (await (await dget("/api/admin/audit?limit=100", dcookie)).json()) as AuditResp;
+  const aText = JSON.stringify(aAudit);
+  check("A sees its own audit entries (validations + order inspections)", aAudit.rows.some((r) => r.kind === "cart.validated") && aAudit.rows.some((r) => r.kind === "order.inspected"), aAudit.rows.map((r) => r.kind).slice(0, 5));
+  check("rows carry only the safe fields (no seq, no prevHash)", !aText.includes('"seq"') && !aText.includes("prevHash") && aAudit.rows.every((r) => Object.keys(r).sort().join() === "at,hash12,id,kind,payload,selfHashOk,summary,tone"), Object.keys(aAudit.rows[0] ?? {}));
+  check("every row re-hashes to its stored hash (selfHashOk)", aAudit.rows.length > 0 && aAudit.rows.every((r) => r.selfHashOk));
+  check("NO tenant-B data in A's audit (cart id, tenant id, B's policy)", !aText.includes("cart-B-secret") && !aText.includes(TB) && !aText.includes(pB));
+  check("chain-level/unauthenticated events are excluded (anchors, rejected webhooks, failed logins)", !aAudit.rows.some((r) => ["audit.anchored", "webhook.rejected", "webhook.received", "admin.login_failed"].includes(r.kind)));
+  const bAudit = (await (await dget("/api/admin/audit?limit=100", bcookie)).json()) as AuditResp;
+  const bText = JSON.stringify(bAudit);
+  check("B sees B's own entries and NONE of A's", bAudit.rows.some((r) => r.summary.includes("cart-B-secret")) && !bText.includes(p1) && !bText.includes(TA) && !bText.includes("c-over") && !bText.includes("c-lie"), bAudit.rows.length);
+  const kindOnly = (await (await dget("/api/admin/audit?limit=100&kind=cart.validated", dcookie)).json()) as AuditResp;
+  check("kind filter returns only that kind (and at least one)", kindOnly.rows.length > 0 && kindOnly.rows.every((r) => r.kind === "cart.validated"));
+  check("bad kind / bad limit => 400", (await dget("/api/admin/audit?kind=wire.money", dcookie)).status === 400 && (await dget("/api/admin/audit?limit=9999", dcookie)).status === 400);
+  const ap1 = (await (await dget("/api/admin/audit?limit=5", dcookie)).json()) as AuditResp;
+  check("pagination: a full page yields an opaque cursor (not a number)", ap1.rows.length === 5 && typeof ap1.nextCursor === "string" && !/^\d+$/.test(ap1.nextCursor!) && ap1.nextCursor!.startsWith("v1."), ap1.nextCursor?.slice(0, 12));
+  const ap2 = (await (await dget(`/api/admin/audit?limit=5&cursor=${encodeURIComponent(ap1.nextCursor!)}`, dcookie)).json()) as AuditResp;
+  const ids1 = new Set(ap1.rows.map((r) => r.id));
+  check("page 2 is disjoint from page 1 and not newer", ap2.rows.length > 0 && ap2.rows.every((r) => !ids1.has(r.id) && r.at <= ap1.rows[ap1.rows.length - 1].at), ap2.rows.length);
+  const tampered = ap1.nextCursor!.slice(0, -2) + "AA";
+  check("tampered cursor => 400", (await dget(`/api/admin/audit?cursor=${encodeURIComponent(tampered)}`, dcookie)).status === 400);
+  check("tenant A's cursor is useless to tenant B => 400", (await dget(`/api/admin/audit?cursor=${encodeURIComponent(ap1.nextCursor!)}`, bcookie)).status === 400);
+  check("a plain number is not a valid cursor => 400", (await dget("/api/admin/audit?cursor=12345", dcookie)).status === 400);
+
+  section("S31 Ledger API: tenant-scoped captures, exact cents, totals, pagination");
+  type LedgerResp = { rows: Array<{ id: number; captureId: string; amount: number; currency: string }>; nextBefore: number | null; summary?: Array<{ currency: string; count: number; total: number }> };
+  const aLed = (await (await dget("/api/admin/ledger?limit=100", dcookie)).json()) as LedgerResp;
+  check("A's ledger has the captures made in earlier scenarios, amounts as integer cents", aLed.rows.length >= 12 && aLed.rows.every((r) => Number.isInteger(r.amount) && r.currency === "USD") && aLed.rows.some((r) => r.amount === 110_000), aLed.rows.length);
+  const tot = aLed.summary?.find((x) => x.currency === "USD");
+  check("summary totals equal the sum of the rows (when all fit on one page)", Boolean(tot) && tot!.count === aLed.rows.length && tot!.total === aLed.rows.reduce((sum, r) => sum + r.amount, 0), { tot, n: aLed.rows.length });
+  const bLed = (await (await dget("/api/admin/ledger?limit=100", bcookie)).json()) as LedgerResp;
+  check("B's ledger is empty (no cross-tenant captures)", bLed.rows.length === 0 && (bLed.summary ?? []).length === 0, bLed);
+  const lp1 = (await (await dget("/api/admin/ledger?limit=3", dcookie)).json()) as LedgerResp;
+  const lp2 = (await (await dget(`/api/admin/ledger?limit=3&before=${lp1.nextBefore}`, dcookie)).json()) as LedgerResp;
+  check("keyset pagination: page 2 strictly older, no overlap, summary only on page 1", lp1.nextBefore !== null && lp2.rows.length > 0 && Math.max(...lp2.rows.map((r) => r.id)) < Math.min(...lp1.rows.map((r) => r.id)) && lp1.summary !== undefined && lp2.summary === undefined);
+  check("ledger: bad limit => 400, no cookie => 401", (await dget("/api/admin/ledger?limit=0", dcookie)).status === 400 && (await dget("/api/admin/ledger", null)).status === 401);
+
+  section("S32 Keys & merchants (read-only): metadata only, never secrets; tenant-scoped");
+  type KeysResp = { keys: Array<Record<string, unknown> & { id: string; status: string; label: string }> };
+  const aKeys = (await (await dget("/api/admin/keys", dcookie)).json()) as KeysResp;
+  const aKeysText = JSON.stringify(aKeys);
+  check("A's keys listed with status; revoked and expired keys are labelled", aKeys.keys.length >= 10 && aKeys.keys.find((k) => k.id === tmp.id)?.status === "revoked" && aKeys.keys.find((k) => k.id === expired.id)?.status === "expired" && aKeys.keys.some((k) => k.status === "active"));
+  check("NO secrets: no raw key, hash, or MFA data in the response", ![agentA.key, adminA.key, tmp.key].some((k) => aKeysText.includes(k)) && !/hash|totp|secret|key_hash/i.test(Object.keys(aKeys.keys[0]).join()), Object.keys(aKeys.keys[0]));
+  const bKeys = (await (await dget("/api/admin/keys", bcookie)).json()) as KeysResp;
+  check("B sees only B's keys", bKeys.keys.length > 0 && !bKeys.keys.some((k) => k.id === agentA.id || k.id === adminA.id) && bKeys.keys.some((k) => k.id === agentB.id));
+  const aMer = (await (await dget("/api/admin/merchants", dcookie)).json()) as { merchants: Array<{ merchantId: string }> };
+  const bMer = (await (await dget("/api/admin/merchants", bcookie)).json()) as { merchants: Array<{ merchantId: string }> };
+  check("merchants are tenant-bound (A has MA only, B has MB only)", aMer.merchants.map((m) => m.merchantId).join() === MA && bMer.merchants.map((m) => m.merchantId).join() === MB, { aMer, bMer });
+  check("keys/merchants: no cookie => 401", (await dget("/api/admin/keys", null)).status === 401 && (await dget("/api/admin/merchants", null)).status === 401);
+
   section("S15 Audit chain integrity after everything above (incl. concurrent writes)");
   check("hash chain verifies end-to-end", (await verifyStoredChain()) === null, await verifyStoredChain());
 }

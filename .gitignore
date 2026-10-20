@@ -44,4 +44,4 @@ next-env.d.ts
 !.env.example
 
 # exported operator data (may contain business data); never commit
-sentinelpay-decisions*.csv
+sentinel*.csv

@@ -23,6 +23,25 @@ export function mergeById<T extends { id: number }>(rows: ReadonlyArray<T>): T[]
 }
 
 /**
+ * Generic merge for live polling: de-duplicate by `key` (later entries win) and order with `compare`.
+ * Rows are identified by a stable key (e.g. a hash) so a poll can never duplicate or reorder existing rows.
+ */
+export function mergeByKey<T>(rows: ReadonlyArray<T>, key: (r: T) => string | number, compare: (a: T, b: T) => number): T[] {
+  const byKey = new Map<string | number, T>();
+  for (const r of rows) byKey.set(key(r), r);
+  return [...byKey.values()].sort(compare);
+}
+
+/** Format integer minor units as currency, e.g. (110000, "USD") => "$1,100.00". Falls back to "<n> <CUR>" for unknown codes. */
+export function formatMinor(minor: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(minor / 100);
+  } catch {
+    return `${(minor / 100).toFixed(2)} ${currency}`;
+  }
+}
+
+/**
  * CSV / spreadsheet-formula injection defence. Cart ids, SKUs and merchant strings are controlled by
  * AGENTS (untrusted input); a cell starting with = + - @ (or a tab/CR) would execute as a formula when
  * the exported file is opened in Excel/Sheets. Prefix such STRINGS with a single quote. Numbers pass through.
@@ -32,3 +51,7 @@ export function csvSafe(v: unknown): string {
   if (typeof v !== "string") return String(v);
   return /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
 }
+
+/** Audit rows that must stand out: an entry that no longer hashes to itself (tamper), a failed capture, or a revoked policy. */
+export const isHotAudit = (r: { selfHashOk: boolean; kind: string }): boolean =>
+  !r.selfHashOk || r.kind === "order.capture_failed" || r.kind === "policy.revoked";

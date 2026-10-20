@@ -131,3 +131,7 @@ CREATE TRIGGER anchors_no_mutate BEFORE UPDATE OR DELETE ON audit_anchors FOR EA
 -- Phase 6a: the audit chain's linearity is enforced by the database, not by an application lock.
 -- Two rows can never share a predecessor, so concurrent writers cannot fork the chain.
 CREATE UNIQUE INDEX IF NOT EXISTS audit_prev_hash_uq ON audit_log (prev_hash);
+
+-- Dashboard audit explorer: tenant-scoped lookups on the (append-only, growing) audit log.
+CREATE INDEX IF NOT EXISTS audit_payload_tenant_idx ON audit_log ((payload->>'tenantId'));
+CREATE INDEX IF NOT EXISTS audit_payload_policy_idx ON audit_log ((payload->>'policyId'));

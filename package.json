@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test tests/core.test.ts tests/sim.test.ts tests/phase4.test.ts tests/ui.test.ts",
+    "test": "node --test tests/core.test.ts tests/sim.test.ts tests/phase4.test.ts tests/ui.test.ts tests/audit-view.test.ts",
     "typecheck": "next typegen && tsc --noEmit",
     "db:migrate": "node --env-file=.env.local scripts/migrate.mjs",
     "sim": "node tools/paypal-sim/server.mjs",
