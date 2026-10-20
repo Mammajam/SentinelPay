@@ -45,3 +45,10 @@ body {
 .sp-badge-REQUIRE_REAUTH { background: rgb(254 243 199); color: rgb(180 83 9); }
 .sp-badge-DENY { background: rgb(254 226 226); color: rgb(185 28 28); }
 .sp-badge-unknown { background: rgb(254 243 199); color: rgb(180 83 9); }
+
+/* Tone / status badges used across the grids. */
+.sp-badge-ok, .sp-badge-active { background: rgb(209 250 229); color: rgb(4 120 87); }
+.sp-badge-warn, .sp-badge-draft, .sp-badge-expired { background: rgb(254 243 199); color: rgb(180 83 9); }
+.sp-badge-bad, .sp-badge-revoked { background: rgb(254 226 226); color: rgb(185 28 28); }
+.sp-badge-info { background: rgb(224 242 254); color: rgb(3 105 161); }
+.sp-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
