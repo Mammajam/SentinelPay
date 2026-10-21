@@ -45,3 +45,6 @@ next-env.d.ts
 
 # exported operator data (may contain business data); never commit
 sentinel*.csv
+
+# APIMatic PayPal skills vendored locally for dev use (MIT, pinned 97bda16); see docs/APIMATIC_VERIFICATION.md
+.claude/skills/paypal-typescript-*/

@@ -20,6 +20,7 @@
   DO_NOT_TRACK=1 npx context-plugins install paypal --targets claude --ref 97bda162cba34576d8633b910fb4f37167812bf8
   ```
   (user scope; then `/reload-plugins` in Claude Code.) The skills are only useful for code that uses the PayPal SDK; SentinelPay calls the REST API directly.
+- **Installed (2026-10-21), project-local:** the `claude` CLI is not installed on the owner's machine, so the official installer could not run. The 9 TypeScript skills (`plugins/paypal/skills/typescript/*`, MIT licence) were copied from the pinned commit `97bda16…` into `.claude/skills/paypal-typescript-*/` (git-ignored; re-create with the loop in this section's history or the command above). They load automatically in Claude Code sessions for this project. Not the official `claude plugin install` path.
 
 ## 3. Verification table
 Verdicts: **MATCH** (code agrees) · **MISMATCH** (code disagreed; fixed) · **UNVERIFIED** (this toolchain cannot confirm it) · **N/A**.
