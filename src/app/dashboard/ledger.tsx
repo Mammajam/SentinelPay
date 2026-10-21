@@ -45,22 +45,22 @@ export function LedgerTab() {
   const error = err ?? first.error ?? null;
   return (
     <section>
-      <p className="mb-2 text-xs text-neutral-600">Payments SentinelPay authorized and PayPal confirmed as captured (recorded from signed webhooks, once per capture id). Amounts are exact integer cents.</p>
+      <p className="mb-2 text-xs sp-muted">Payments SentinelPay authorized and PayPal confirmed as captured (recorded from signed webhooks, once per capture id). Amounts are exact integer cents.</p>
       {summary.length > 0 && (
         <div className="mb-3 flex flex-wrap gap-3">
           {summary.map((s) => (
-            <div key={s.currency} className="rounded border px-3 py-2 text-sm">
-              <div className="text-xs text-neutral-500">Total captured ({s.currency})</div>
-              <div className="text-lg font-semibold">{formatMinor(s.total, s.currency)}</div>
-              <div className="text-xs text-neutral-500">{s.count} capture{s.count === 1 ? "" : "s"}</div>
+            <div key={s.currency} className="sp-card px-4 py-3 text-sm">
+              <div className="text-xs sp-muted">Total captured ({s.currency})</div>
+              <div className="text-xl font-semibold text-brand-navy dark:text-foreground">{formatMinor(s.total, s.currency)}</div>
+              <div className="text-xs sp-muted">{s.count} capture{s.count === 1 ? "" : "s"}</div>
             </div>
           ))}
         </div>
       )}
-      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      {error && <p role="alert" className="text-sm sp-badge-bad rounded-lg px-3 py-2">{error}</p>}
       <GridToolbar gridRef={gridRef} fileName="sentinel-ledger.csv" quick={quick} onQuick={setQuick} stateKey="ledger" defaultSort={DEFAULT_SORT} count={rows.length}>
-        {cursor && <button className="rounded border px-2 py-1" onClick={loadOlder}>Load older</button>}
-        <button className="rounded border px-2 py-1" onClick={() => { setMore([]); setNext(undefined); setTick((t) => t + 1); }}>Refresh</button>
+        {cursor && <button className="sp-btn" onClick={loadOlder}>Load older</button>}
+        <button className="sp-btn" onClick={() => { setMore([]); setNext(undefined); setTick((t) => t + 1); }}>Refresh</button>
       </GridToolbar>
       <DataGrid<LedgerRow>
         gridRef={gridRef}

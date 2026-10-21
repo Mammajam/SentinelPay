@@ -53,9 +53,9 @@ function Rows({ filter, live, quick, onQuick }: { filter: string; live: boolean;
   const error = err ?? first.error ?? null;
   return (
     <>
-      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      {error && <p role="alert" className="text-sm sp-badge-bad rounded-lg px-3 py-2">{error}</p>}
       <GridToolbar gridRef={gridRef} fileName="sentinel-decisions.csv" quick={quick} onQuick={onQuick} stateKey="decisions" defaultSort={DEFAULT_SORT} count={rows.length}>
-        {cursor && <button className="rounded border px-2 py-1" onClick={loadOlder}>Load older</button>}
+        {cursor && <button className="sp-btn" onClick={loadOlder}>Load older</button>}
       </GridToolbar>
       <DataGrid<Decision>
         gridRef={gridRef}
@@ -81,13 +81,13 @@ export function DecisionsTab() {
   const [quick, setQuick] = useState("");
   return (
     <section>
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
         <label htmlFor="df">Decision</label>
-        <select id="df" className="rounded border px-2 py-1" value={filter} onChange={(e) => setFilter(e.target.value)}>
+        <select id="df" className="sp-select" value={filter} onChange={(e) => setFilter(e.target.value)}>
           <option value="">All</option><option>ALLOW</option><option>REQUIRE_REAUTH</option><option>DENY</option>
         </select>
         <label className="ml-2 flex items-center gap-1"><input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} /> Live (every 5 s)</label>
-        <button className="ml-auto rounded border px-2 py-1" onClick={() => setTick((t) => t + 1)}>Refresh</button>
+        <button className="sp-btn ml-auto" onClick={() => setTick((t) => t + 1)}>Refresh</button>
       </div>
       {/* keyed: changing the filter or refreshing resets pagination state cleanly */}
       <Rows key={`${filter}-${tick}`} filter={filter} live={live} quick={quick} onQuick={setQuick} />

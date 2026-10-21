@@ -34,14 +34,14 @@ export function AccessTab() {
   return (
     <section className="space-y-6">
       <div>
-        <h2 className="mb-1 font-medium">API keys</h2>
-        <p className="mb-2 text-xs text-neutral-600">Only the identifying prefix is shown; keys and their hashes are never displayed. To revoke or rotate, use the operator CLI: <code>npm run admin -- revoke --tenant … --key-id …</code> / <code>rotate</code>.</p>
+        <h2 className="mb-1 text-base font-semibold">API keys</h2>
+        <p className="mb-2 text-xs sp-muted">Only the identifying prefix is shown; keys and their hashes are never displayed. To revoke or rotate, use the operator CLI: <code>npm run admin -- revoke --tenant … --key-id …</code> / <code>rotate</code>.</p>
         <GridToolbar gridRef={keyRef} fileName="sentinel-keys.csv" quick={quickK} onQuick={setQuickK} stateKey="keys" defaultSort={DEFAULT_SORT} count={keyRows.length} />
         <DataGrid<KeyRow> gridRef={keyRef} rows={keyRows} columns={keyCols} getRowId={(p) => p.data.id} loading={!keys.data && !keys.error} emptyText="No keys." pageSize={10} quickFilter={quickK} stateKey="keys" defaultSort={DEFAULT_SORT} ariaLabel="API keys" />
       </div>
       <div>
-        <h2 className="mb-1 font-medium">Registered merchants</h2>
-        <p className="mb-2 text-xs text-neutral-600">A PayPal merchant belongs to exactly one tenant. Orders from any other merchant are denied under your policies. Add one with <code>npm run admin -- add-merchant</code>.</p>
+        <h2 className="mb-1 text-base font-semibold">Registered merchants</h2>
+        <p className="mb-2 text-xs sp-muted">A PayPal merchant belongs to exactly one tenant. Orders from any other merchant are denied under your policies. Add one with <code>npm run admin -- add-merchant</code>.</p>
         <GridToolbar gridRef={merRef} fileName="sentinel-merchants.csv" quick={quickM} onQuick={setQuickM} stateKey="merchants" count={merchantRows.length} />
         <DataGrid<MerchantRow> gridRef={merRef} rows={merchantRows} columns={merchantCols} getRowId={(p) => p.data.merchantId} loading={!merchants.data && !merchants.error} emptyText="No merchants registered." pageSize={10} quickFilter={quickM} stateKey="merchants" ariaLabel="Registered merchants" />
       </div>

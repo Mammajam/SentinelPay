@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -16,6 +16,8 @@ export const metadata: Metadata = {
   title: "SentinelPay",
   description: "Guardrail & verification proxy for agentic commerce",
 };
+
+export const viewport: Viewport = { themeColor: "#003087" };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

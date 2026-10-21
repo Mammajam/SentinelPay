@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 // Client-only: AG Grid has no meaningful server render, and skipping it avoids a light-themed flash before hydration.
 export const DataGrid = dynamic(() => import("../data-grid.tsx"), {
   ssr: false,
-  loading: () => <p className="py-6 text-sm text-neutral-500">Loading grid…</p>,
+  loading: () => <p className="sp-card sp-muted animate-pulse p-8 text-center text-sm">Loading grid…</p>,
 }) as typeof import("../data-grid.tsx").default;
 
 export async function getJson<T>(url: string): Promise<T> {
@@ -36,10 +36,10 @@ export function SecureAction({ label, busy, onSubmit, onCancel }: { label: strin
   const [totp, setTotp] = useState("");
   return (
     <form className="mt-2 flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); onSubmit(key, totp); setKey(""); setTotp(""); }}>
-      <input className="w-64 rounded border px-2 py-1 text-xs" type="password" autoComplete="off" placeholder="Admin API key" value={key} onChange={(e) => setKey(e.target.value)} />
-      <input className="w-28 rounded border px-2 py-1 text-xs" inputMode="numeric" autoComplete="one-time-code" placeholder="6-digit code" maxLength={6} value={totp} onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))} />
-      <button disabled={busy || key.length < 10 || totp.length !== 6} className="rounded bg-black px-3 py-1 text-xs text-white disabled:opacity-40">{busy ? "Working…" : label}</button>
-      <button type="button" onClick={onCancel} className="text-xs underline">Cancel</button>
+      <input className="sp-input w-64 text-xs" type="password" autoComplete="off" placeholder="Admin API key" value={key} onChange={(e) => setKey(e.target.value)} />
+      <input className="sp-input w-28 text-xs" inputMode="numeric" autoComplete="one-time-code" placeholder="6-digit code" maxLength={6} value={totp} onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))} />
+      <button disabled={busy || key.length < 10 || totp.length !== 6} className="sp-btn sp-btn-cta">{busy ? "Working…" : label}</button>
+      <button type="button" onClick={onCancel} className="sp-link">Cancel</button>
     </form>
   );
 }

@@ -16,8 +16,30 @@ function subscribe(cb: () => void) {
 }
 const prefersDark = () => window.matchMedia(MEDIA).matches;
 
-const lightTheme = themeQuartz.withPart(colorSchemeLight);
-const darkTheme = themeQuartz.withPart(colorSchemeDark);
+// Quartz with PayPal-navy headers and the Quartz blue accent; values mirror the tokens in globals.css.
+const baseParams = { fontFamily: "var(--font-geist-sans), system-ui, sans-serif", wrapperBorderRadius: 12, borderRadius: 8, headerFontWeight: 600 };
+const lightTheme = themeQuartz.withPart(colorSchemeLight).withParams({
+  ...baseParams,
+  accentColor: "#0070e0",
+  backgroundColor: "#ffffff",
+  foregroundColor: "#0b1b33",
+  borderColor: "#dbe3ee",
+  headerBackgroundColor: "#003087",
+  headerTextColor: "#ffffff",
+  oddRowBackgroundColor: "#f6f9fd",
+  rowHoverColor: "#e6f0fc",
+});
+const darkTheme = themeQuartz.withPart(colorSchemeDark).withParams({
+  ...baseParams,
+  accentColor: "#4aa3ff",
+  backgroundColor: "#111c30",
+  foregroundColor: "#e8eefb",
+  borderColor: "#243350",
+  headerBackgroundColor: "#0a2a63",
+  headerTextColor: "#ffffff",
+  oddRowBackgroundColor: "#0e1829",
+  rowHoverColor: "#18284a",
+});
 
 /** localStorage can throw (private windows, blocked site data): treat "unavailable" as "no saved layout". */
 function storage(): Storage | undefined {
@@ -51,7 +73,7 @@ export default function DataGrid<T>({ rows, columns, getRowId, rowClassRules, lo
   const dark = useSyncExternalStore(subscribe, prefersDark, () => false);
   const persist = (api: GridApi<T>) => { if (stateKey) saveState(stateKey, api.getColumnState(), storage()); };
   return (
-    <div className="w-full" data-testid="data-grid" role="region" aria-label={ariaLabel}>
+    <div className="sp-card w-full overflow-hidden" data-testid="data-grid" role="region" aria-label={ariaLabel}>
       <AgGridReact<T>
         ref={gridRef}
         theme={dark ? darkTheme : lightTheme}

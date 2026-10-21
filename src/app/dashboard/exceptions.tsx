@@ -28,7 +28,7 @@ export function ExceptionsTab() {
     { field: "attempt", headerName: "Attempt", maxWidth: 120, filter: "agNumberColumnFilter" },
     { field: "at", headerName: "When", minWidth: 190, valueFormatter: (p) => new Date(p.value).toLocaleString(), comparator: (a, b) => Date.parse(a) - Date.parse(b) },
     { headerName: "", colId: "action", sortable: false, filter: false, maxWidth: 150, cellRenderer: (p: ICellRendererParams<ExceptionView>) => (
-      <button className="rounded border px-2 text-xs" onClick={() => setOpen(p.data?.orderId ?? null)}>Re-trigger…</button>
+      <button className="sp-btn !px-2.5 !py-0.5 !text-xs" onClick={() => setOpen(p.data?.orderId ?? null)}>Re-trigger…</button>
     ) },
   ], []);
 
@@ -45,8 +45,8 @@ export function ExceptionsTab() {
   return (
     <section>
       <div className="mb-2 flex items-center gap-2">
-        <p className="text-xs text-neutral-600">Captures that failed and have not since succeeded. Re-triggering asks PayPal for the order&apos;s current state, re-checks your policy, and never double-charges. Highlighted rows have an UNKNOWN outcome: reconcile before retrying.</p>
-        <button className="ml-auto rounded border px-2 py-1 text-sm" onClick={() => setTick((t) => t + 1)}>Refresh</button>
+        <p className="text-xs sp-muted">Captures that failed and have not since succeeded. Re-triggering asks PayPal for the order&apos;s current state, re-checks your policy, and never double-charges. Highlighted rows have an UNKNOWN outcome: reconcile before retrying.</p>
+        <button className="sp-btn ml-auto" onClick={() => setTick((t) => t + 1)}>Refresh</button>
       </div>
       {msg && <p role="status" className="mb-2 text-sm">{msg}</p>}
       <GridToolbar gridRef={gridRef} fileName="sentinel-exceptions.csv" quick={quick} onQuick={setQuick} stateKey="exceptions" count={items.length} />
@@ -64,7 +64,7 @@ export function ExceptionsTab() {
         ariaLabel="Failed captures"
       />
       {selected && (
-        <div className="mt-3 rounded border p-3 text-sm">
+        <div className="sp-card mt-3 p-4 text-sm">
           <p>Re-trigger capture for <span className="font-mono">{selected.orderId}</span> (attempt {selected.attempt}{selected.ambiguous ? ", outcome unknown: the same idempotency key is reused" : ""})</p>
           <SecureAction label="Re-trigger capture" busy={busy} onSubmit={(k, t) => retrigger(selected, k, t)} onCancel={() => setOpen(null)} />
         </div>

@@ -22,11 +22,11 @@ type TabId = (typeof TABS)[number][0];
 export function DashboardClient() {
   const [tab, setTab] = useState<TabId>("decisions");
   return (
-    <div className="mt-6">
-      <div role="tablist" className="mb-4 flex flex-wrap gap-1 border-b">
+    <div className="mt-8">
+      <div role="tablist" className="sp-tabs mb-5">
         {TABS.map(([id, label]) => (
           <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)}
-            className={`px-4 py-2 text-sm ${tab === id ? "border-b-2 border-black font-medium dark:border-white" : "text-neutral-500"}`}>{label}</button>
+            className="sp-tab">{label}</button>
         ))}
       </div>
       {tab === "decisions" && <DecisionsTab />}

@@ -56,9 +56,9 @@ function Rows({ kind, live, quick, onQuick }: { kind: string; live: boolean; qui
   const error = err ?? first.error ?? null;
   return (
     <>
-      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      {error && <p role="alert" className="text-sm sp-badge-bad rounded-lg px-3 py-2">{error}</p>}
       <GridToolbar gridRef={gridRef} fileName="sentinel-audit.csv" quick={quick} onQuick={onQuick} stateKey="audit" defaultSort={DEFAULT_SORT} count={rows.length}>
-        {cursor && <button className="rounded border px-2 py-1" onClick={loadOlder}>Load older</button>}
+        {cursor && <button className="sp-btn" onClick={loadOlder}>Load older</button>}
       </GridToolbar>
       <DataGrid<AuditRow>
         gridRef={gridRef}
@@ -76,13 +76,13 @@ function Rows({ kind, live, quick, onQuick }: { kind: string; live: boolean; qui
         onRowClicked={setSelected}
       />
       {selected && (
-        <article className="mt-3 rounded border p-3 text-sm" aria-label="Audit entry detail">
+        <article className="sp-card mt-3 p-4 text-sm" aria-label="Audit entry detail">
           <div className="flex items-center justify-between">
             <span><b>{selected.kind}</b> · {new Date(selected.at).toLocaleString()}</span>
-            <button className="text-xs underline" onClick={() => setSelected(null)}>Close</button>
+            <button className="sp-link" onClick={() => setSelected(null)}>Close</button>
           </div>
-          <p className="mt-1 text-xs text-neutral-500">Entry hash <span className="sp-mono">{selected.id}</span> · {selected.selfHashOk ? "re-hashes to its stored hash (intact)" : "DOES NOT re-hash: altered"}</p>
-          <pre className="mt-2 max-h-64 overflow-auto rounded bg-neutral-100 p-2 text-xs text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100">{selected.payload}</pre>
+          <p className="mt-1 text-xs sp-muted">Entry hash <span className="sp-mono">{selected.id}</span> · {selected.selfHashOk ? "re-hashes to its stored hash (intact)" : "DOES NOT re-hash: altered"}</p>
+          <pre className="mt-2 max-h-64 overflow-auto sp-card-flat p-3 text-xs sp-mono">{selected.payload}</pre>
         </article>
       )}
     </>
@@ -96,15 +96,15 @@ export function AuditTab() {
   const [quick, setQuick] = useState("");
   return (
     <section>
-      <p className="mb-2 text-xs text-neutral-600">Tamper-evident record of what happened in your tenant. Each entry is hash-chained to the one before it and re-checked here; the full chain and its external anchors are verified in the header.</p>
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
+      <p className="mb-2 text-xs sp-muted">Tamper-evident record of what happened in your tenant. Each entry is hash-chained to the one before it and re-checked here; the full chain and its external anchors are verified in the header.</p>
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
         <label htmlFor="ak">Event</label>
-        <select id="ak" className="rounded border px-2 py-1" value={kind} onChange={(e) => setKind(e.target.value)}>
+        <select id="ak" className="sp-select" value={kind} onChange={(e) => setKind(e.target.value)}>
           <option value="">All</option>
           {TENANT_KINDS.map((k) => <option key={k}>{k}</option>)}
         </select>
         <label className="ml-2 flex items-center gap-1"><input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} /> Live (every 5 s)</label>
-        <button className="ml-auto rounded border px-2 py-1" onClick={() => setTick((t) => t + 1)}>Refresh</button>
+        <button className="sp-btn ml-auto" onClick={() => setTick((t) => t + 1)}>Refresh</button>
       </div>
       <Rows key={`${kind}-${tick}`} kind={kind} live={live} quick={quick} onQuick={setQuick} />
     </section>

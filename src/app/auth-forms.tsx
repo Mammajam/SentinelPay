@@ -24,11 +24,15 @@ export function LoginForm() {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-3">
-      <input className="w-full rounded border px-3 py-2 text-sm" type="password" autoComplete="off" placeholder="Admin API key (sp_adm_…)" value={key} onChange={(e) => setKey(e.target.value)} />
-      <input className="w-full rounded border px-3 py-2 text-sm" inputMode="numeric" autoComplete="one-time-code" placeholder="6-digit code" maxLength={6} value={totp} onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))} />
-      {err && <p className="text-sm text-red-700" role="alert">{err}</p>}
-      <button disabled={busy || key.length < 10 || totp.length !== 6} className="rounded bg-black px-4 py-2 text-sm text-white disabled:opacity-40">
+    <form onSubmit={submit} className="space-y-4">
+      <label className="block text-sm font-medium">Admin API key
+        <input className="sp-input mt-1 w-full" type="password" autoComplete="off" placeholder="sp_adm_…" value={key} onChange={(e) => setKey(e.target.value)} />
+      </label>
+      <label className="block text-sm font-medium">One-time code
+        <input className="sp-input mt-1 w-full text-center font-mono text-lg tracking-[0.5em]" inputMode="numeric" autoComplete="one-time-code" placeholder="••••••" maxLength={6} value={totp} onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))} />
+      </label>
+      {err && <p className="rounded-lg px-3 py-2 text-sm sp-badge-bad" role="alert">{err}</p>}
+      <button disabled={busy || key.length < 10 || totp.length !== 6} className="sp-btn sp-btn-cta sp-btn-lg">
         {busy ? "Signing in…" : "Sign in"}
       </button>
     </form>
@@ -38,7 +42,7 @@ export function LoginForm() {
 export function LogoutButton() {
   return (
     <button
-      className="rounded border px-3 py-1 text-sm"
+      className="rounded-full border border-white/40 bg-white/10 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
       onClick={async () => { await fetch("/api/admin/logout", { method: "POST" }); window.location.reload(); }}
     >
       Sign out

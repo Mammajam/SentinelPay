@@ -33,7 +33,7 @@ export function PoliciesTab() {
     { field: "createdAt", headerName: "Created", minWidth: 190, valueFormatter: (p) => new Date(p.value).toLocaleString(), comparator: (a, b) => Date.parse(a) - Date.parse(b) },
     { headerName: "Hash", colId: "hash", maxWidth: 150, cellClass: "sp-mono", valueGetter: (p) => p.data?.hash.slice(0, 12) ?? "" },
     { headerName: "", colId: "review", sortable: false, filter: false, maxWidth: 120, cellRenderer: (p: ICellRendererParams<PolicyView>) => (
-      <button className="rounded border px-2 text-xs" onClick={() => { setSelectedId(p.data?.id ?? null); setAction(null); }}>Review</button>
+      <button className="sp-btn !px-2.5 !py-0.5 !text-xs" onClick={() => { setSelectedId(p.data?.id ?? null); setAction(null); }}>Review</button>
     ) },
   ], []);
 
@@ -51,7 +51,7 @@ export function PoliciesTab() {
     <section className="space-y-3">
       {msg && <p role="status" className="text-sm">{msg}</p>}
       <GridToolbar gridRef={gridRef} fileName="sentinel-policies.csv" quick={quick} onQuick={setQuick} stateKey="policies" defaultSort={DEFAULT_SORT} count={items.length}>
-        <button className="rounded border px-2 py-1" onClick={() => setTick((t) => t + 1)}>Refresh</button>
+        <button className="sp-btn" onClick={() => setTick((t) => t + 1)}>Refresh</button>
       </GridToolbar>
       <DataGrid<PolicyView>
         gridRef={gridRef}
@@ -68,20 +68,20 @@ export function PoliciesTab() {
         onRowClicked={(r) => { setSelectedId(r.id); setAction(null); }}
       />
       {selected && (
-        <article className="rounded border p-3 text-sm" aria-label="Policy detail">
+        <article className="sp-card mt-3 p-4 text-sm" aria-label="Policy detail">
           <div className="flex items-center justify-between">
             <span className="font-mono text-xs">{selected.id}</span>
             {badge(selected.status, selected.status)}
           </div>
-          <p className="mt-1 text-neutral-600">“{selected.directive}”</p>
+          <p className="mt-1 sp-muted">“{selected.directive}”</p>
           <ul className="mt-2 list-disc pl-5">{selected.rules.map((r, i) => <li key={i}>{r}</li>)}</ul>
-          <p className="mt-2 break-all font-mono text-[11px] text-neutral-500">sha256 {selected.hash}</p>
+          <p className="mt-2 break-all font-mono text-[11px] sp-muted">sha256 {selected.hash}</p>
           {selected.status === "active" && (action === "revoke"
             ? <SecureAction label="Revoke policy" busy={busy} onSubmit={(k, t) => call("/api/policies/revoke", selected, k, t)} onCancel={() => setAction(null)} />
-            : <button className="mt-2 rounded border border-red-600 px-3 py-1 text-xs text-red-600" onClick={() => setAction("revoke")}>Revoke…</button>)}
+            : <button className="sp-btn mt-2 !border-[var(--bad-fg)] !text-[var(--bad-fg)]" onClick={() => setAction("revoke")}>Revoke…</button>)}
           {selected.status === "draft" && (action === "confirm"
             ? <SecureAction label="Confirm policy" busy={busy} onSubmit={(k, t) => call("/api/policies/confirm", selected, k, t)} onCancel={() => setAction(null)} />
-            : <button className="mt-2 rounded border px-3 py-1 text-xs" onClick={() => setAction("confirm")}>Review &amp; confirm…</button>)}
+            : <button className="sp-btn sp-btn-primary mt-2" onClick={() => setAction("confirm")}>Review &amp; confirm…</button>)}
         </article>
       )}
     </section>

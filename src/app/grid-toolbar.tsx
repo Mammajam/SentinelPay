@@ -33,20 +33,20 @@ export function GridToolbar<T>({ gridRef, fileName, quick, onQuick, stateKey, de
     if (stateKey) { try { clearState(stateKey, window.localStorage); } catch { /* storage unavailable */ } }
   };
   return (
-    <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
+    <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
       <input
         type="search"
         aria-label="Quick filter"
         placeholder="Quick filter…"
-        className="w-48 rounded border px-2 py-1"
+        className="sp-input w-56"
         value={quick}
         onChange={(e) => onQuick(e.target.value)}
       />
-      <span className="text-xs text-neutral-500">{count} row{count === 1 ? "" : "s"} loaded</span>
+      <span className="sp-muted text-xs">{count} row{count === 1 ? "" : "s"} loaded</span>
       {children}
       <span className="ml-auto flex gap-2">
-        <button className="rounded border px-2 py-1" onClick={reset}>Reset layout</button>
-        <button className="rounded border px-2 py-1" onClick={exportCsv} disabled={count === 0}>Export CSV</button>
+        <button className="sp-btn" onClick={reset}>Reset layout</button>
+        <button className="sp-btn sp-btn-primary" onClick={exportCsv} disabled={count === 0}>Export CSV</button>
       </span>
     </div>
   );
